@@ -81,7 +81,8 @@ std::vector<ShellEnumerator::Item> ShellEnumerator::EnumerateDesktop()
 
         STRRET str{};
         // 显示名：Explorer 风格（.lnk 不带扩展名）
-        if (SUCCEEDED(desktop->GetDisplayNameOf(pidl, SIGDN_PARENTRELATIVEEDITING, &str))) {
+        if (SUCCEEDED(desktop->GetDisplayNameOf(
+                pidl, (SHGDNF)SIGDN_PARENTRELATIVEEDITING, &str))) {
             wchar_t buf[512];
             if (SUCCEEDED(StrRetToBufW(&str, pidl, buf, 512))) item.displayName = buf;
         }

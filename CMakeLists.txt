@@ -50,7 +50,11 @@ add_executable(winfence
   src/ui/IconCache.cpp
   src/ui/DropTarget.cpp
   src/ui/SettingsDialog.cpp
+  src/ui/OrganizeHint.cpp
+  src/ui/AiPreviewDialog.cpp
   src/ui/DockWindow.cpp
+  src/ai/AiClient.cpp
+  src/ai/AiGrouping.cpp
   src/ui/DockWindow.cpp
   src/ui/FenceRenderer.cpp
   src/ui/FenceWindow.cpp
@@ -84,7 +88,7 @@ target_link_libraries(winfence PRIVATE
   d2d1 dxgi dxguid d3d11 dcomp dwmapi          # 渲染与合成
   dwrite windowscodecs                          # 文本与位图转换
   shell32 shcore ole32 oleaut32 uuid            # Shell / OLE / DPI
-  user32 gdi32 advapi32 shlwapi comctl32)
+  user32 gdi32 advapi32 shlwapi comctl32 winhttp crypt32)
 
 set_target_properties(winfence PROPERTIES OUTPUT_NAME "WinFence")
 

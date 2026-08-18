@@ -207,8 +207,13 @@ bool App::EnsureAppWindow()
 
     appHwnd_ = CreateWindowExW(0, kAppWndClass, L"WinFenceApp", WS_OVERLAPPED,
                                0, 0, 0, 0, nullptr, nullptr, instance_, this);
-    if (!appHwnd_) (void)atom;   // 注册成功但创建失败（罕见），交由调用方提示
-    return appHwnd_ != nullptr;
+    if (!appHwnd_) {
+        (void)atom;   // 注册成功但创建失败（罕见），交由调用方提示
+        return false;
+    }
+    // 全局热键：Ctrl+Alt+N 新建栅栏（M7a：桌面空白处右键属 Explorer，热键补位）
+    RegisterHotKey(appHwnd_, 1, MOD_CONTROL | MOD_ALT, 'N');
+    return true;
 }
 
 LRESULT CALLBACK App::AppWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
@@ -227,6 +232,10 @@ LRESULT CALLBACK App::AppWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 
 LRESULT App::HandleAppMsg(UINT msg, WPARAM wp, LPARAM lp)
 {
+    if (msg == WM_HOTKEY && wp == 1) {    // Ctrl+Alt+N → 新建栅栏
+        HandleAction(AppAction::NewFence, 0);
+        return 0;
+    }
     if (msg == kMsgFileEvents) {          // Watcher 批量事件（所有权转移）
         HandleFileEvents(reinterpret_cast<DesktopWatcher::EventBatch*>(wp));
         return 0;
@@ -245,7 +254,7 @@ LRESULT App::HandleAppMsg(UINT msg, WPARAM wp, LPARAM lp)
     if (msg == WM_COMMAND) {              // 托盘菜单命令
         switch (LOWORD(wp)) {
         case kMenuSettings:
-            SettingsDialog::ShowSingle(instance_, ws_, store_, [this]() {
+            SettingsDialog::ShowSingle(instance_, ws_, icons_, store_, [this]() {
                 RefreshAllFences();
                 SyncDockVisibility();
             });
@@ -262,6 +271,7 @@ LRESULT App::HandleAppMsg(UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
     if (msg == WM_DESTROY) {
+        UnregisterHotKey(appHwnd_, 1);
         RemoveTrayIcon();
         return 0;
     }
@@ -298,7 +308,7 @@ void App::ShowTrayMenu()
 {
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, kMenuSettings, L"设置…");
-    AppendMenuW(menu, MF_STRING, kMenuNewFence, L"新建栅栏");
+    AppendMenuW(menu, MF_STRING, kMenuNewFence, L"新建栅栏 (Ctrl+Alt+N)");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kMenuExit, L"退出 WinFence");
 

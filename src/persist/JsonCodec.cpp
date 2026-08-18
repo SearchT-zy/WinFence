@@ -194,6 +194,17 @@ bool JsonCodec::Encode(const Workspace& ws, const IconRegistry& icons, std::stri
         j["nextUid"]           = ws.nextUid;
         j["nextFenceId"]       = ws.nextFenceId;
         j["showOnAllMonitors"] = ws.showOnAllMonitors;
+        j["hintHideIconsDismissed"] = ws.hintHideIconsDismissed;
+        j["ai"] = {{"provider", ToUtf8(ws.ai.provider)}, {"model", ToUtf8(ws.ai.model)}};
+        if (ws.aiBackup.present) {
+            json bf = json::array();
+            for (const auto& [id, items] : ws.aiBackup.fences) {
+                json fr{{"id", id}, {"items", items}};
+                bf.push_back(std::move(fr));
+            }
+            j["aiBackup"] = {{"present", true}, {"fences", std::move(bf)},
+                             {"dock", ws.aiBackup.dock}};
+        }
         j["defaultStyle"]      = StyleToJson(ws.defaultStyle);
 
         json jIcons = json::array();
@@ -275,6 +286,34 @@ bool JsonCodec::Decode(const std::string& utf8In, Workspace& ws, IconRegistry& i
             ws.nextFenceId = j["nextFenceId"].get<uint32_t>();
         if (j.contains("showOnAllMonitors") && j["showOnAllMonitors"].is_boolean())
             ws.showOnAllMonitors = j["showOnAllMonitors"].get<bool>();
+        if (j.contains("hintHideIconsDismissed") && j["hintHideIconsDismissed"].is_boolean())
+            ws.hintHideIconsDismissed = j["hintHideIconsDismissed"].get<bool>();
+        if (j.contains("ai") && j["ai"].is_object()) {
+            ws.ai.provider = FromUtf8(j["ai"].value("provider", std::string("deepseek")));
+            ws.ai.model    = FromUtf8(j["ai"].value("model", std::string()));
+        }
+        if (j.contains("aiBackup") && j["aiBackup"].is_object()) {
+            const auto& jb = j["aiBackup"];
+            ws.aiBackup.present =
+                jb.contains("present") && jb["present"].is_boolean() &&
+                jb["present"].get<bool>();
+            if (jb.contains("fences") && jb["fences"].is_array()) {
+                for (const auto& jf : jb["fences"]) {
+                    if (!jf.is_object() || !jf.contains("id")) continue;
+                    std::vector<IconUid> items;
+                    if (jf.contains("items") && jf["items"].is_array())
+                        for (const auto& ju : jf["items"])
+                            if (ju.is_number_unsigned())
+                                items.push_back(ju.get<IconUid>());
+                    ws.aiBackup.fences.emplace_back(jf["id"].get<FenceId>(),
+                                                    std::move(items));
+                }
+            }
+            if (jb.contains("dock") && jb["dock"].is_array())
+                for (const auto& ju : jb["dock"])
+                    if (ju.is_number_unsigned())
+                        ws.aiBackup.dock.push_back(ju.get<IconUid>());
+        }
         if (j.contains("defaultStyle"))
             ws.defaultStyle = StyleFrom(j["defaultStyle"], ws.defaultStyle);
 

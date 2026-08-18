@@ -3,6 +3,7 @@
 // 迭代二：AI 分组的落库也走本类（ApplyGroupPlan，§6），保证不绕过模型约束。
 #pragma once
 #include "core/Model.h"
+#include <utility>
 #include <vector>
 
 namespace winfence {
@@ -30,6 +31,11 @@ public:
 
     // 迭代二占位：应用 AI 分组计划（严格校验后调用，见 ai/AiProvider.h）
     // bool ApplyGroupPlan(Workspace& ws, const GroupPlan& plan);
+
+    // ---- M7b：AI 分组应用 / 一键重置（§6.1/§6.5 仅模型操作）----
+    using GroupPlan = std::vector<std::pair<std::wstring, std::vector<IconUid>>>;
+    static bool ApplyGroupPlan(Workspace& ws, const GroupPlan& plan);
+    static bool ResetAiGrouping(Workspace& ws);
 };
 
 } // namespace winfence

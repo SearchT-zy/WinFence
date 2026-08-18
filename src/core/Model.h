@@ -74,6 +74,19 @@ struct Dock {
     std::vector<IconUid> items;             // Dock 内图标，顺序即显示顺序（≤100）
 };
 
+// ---------- AI 设置（M7b：密钥经 DPAPI 存 ai.key，绝不入 JSON）----------
+struct AiSettings {
+    std::wstring provider = L"deepseek";    // "deepseek" | "ollama"
+    std::wstring model;                     // 空 = 默认（deepseek-chat / qwen2.5:7b）
+};
+
+// ---------- AI 分组快照（应用前备份，支持一键重置，§6.5）----------
+struct AiBackup {
+    bool present = false;
+    std::vector<std::pair<FenceId, std::vector<IconUid>>> fences;
+    std::vector<IconUid> dock;
+};
+
 // ---------- 全局工作区（= config.json 顶层）----------
 struct Workspace {
     uint32_t             schemaVersion = 1;
@@ -83,6 +96,11 @@ struct Workspace {
     FenceStyle           defaultStyle;   // 新建栅栏的初始样式
     bool                 showOnAllMonitors = true;
     Dock                 dock;
+    AiSettings           ai;
+    AiBackup             aiBackup;
+
+    // 一次性教育提示（首次拖入成功后询问是否隐藏桌面图标）
+    bool                 hintHideIconsDismissed = false;
 
     // 设计说明：不存在"未分组"实体——不在任何 fence.items 里的桌面图标
     // 天然是未分组，由系统桌面展示，无需建模（DESIGN.md §2）。

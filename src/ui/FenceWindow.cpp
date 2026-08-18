@@ -8,6 +8,7 @@
 
 #include "core/FenceService.h"
 #include "persist/ConfigStore.h"
+#include "ui/OrganizeHint.h"
 #include "shell/DesktopAnchor.h"
 #include "shell/MonitorUtil.h"
 #include "ui/Compositor.h"
@@ -74,7 +75,7 @@ bool FenceWindow::Create(HINSTANCE instance, Fence& fence, Workspace& ws,
 
     hwnd_ = CreateWindowExW(
         WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-        kClassName, fence.title.c_str(), WS_POPUP,
+        kClassName, fence.title.c_str(), WS_POPUP | WS_THICKFRAME,   // THICKFRAME 才能缩放
         r.left, r.top, r.right - r.left, r.bottom - r.top,
         nullptr, nullptr, instance, this);
     if (!hwnd_) return false;
@@ -97,6 +98,7 @@ bool FenceWindow::Create(HINSTANCE instance, Fence& fence, Workspace& ws,
         if (ok) {
             RequestRender();
             ScheduleSave();
+            MaybeShowVirtualGroupingHint(hwnd_, *ws_, *store_);   // 首次拖入教育（一次）
         }
         return ok;
     });
@@ -160,6 +162,10 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
     case WM_NCCREATE:
+        break;
+
+    case WM_NCCALCSIZE:   // 无边框但可缩放：客户区覆盖整个窗口（消除 THICKFRAME 边框内缩）
+        if (wp) return 0;
         break;
 
     case WM_NCHITTEST:
@@ -444,10 +450,10 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
         if (onAction_) onAction_(AppAction::DeleteFence, fence_->id);
         return 0;
 
-    case WM_GETMINMAXINFO: {   // 无边框浮层：解除系统默认最小跟踪尺寸钳制
+    case WM_GETMINMAXINFO: {   // 系统级最小尺寸（与 WM_SIZING 约束一致）
         auto* mmi = reinterpret_cast<MINMAXINFO*>(lp);
-        mmi->ptMinTrackSize.x = 0;
-        mmi->ptMinTrackSize.y = 0;
+        mmi->ptMinTrackSize.x = kMinWidthPx;
+        mmi->ptMinTrackSize.y = kMinHeightPx;
         return 0;
     }
 
@@ -509,8 +515,21 @@ LRESULT FenceWindow::OnNcHitTest(LPARAM lp)
 
     const int titleH = MonitorUtil::DipToPx(fence_->style.titleBarHeightDip, dpi_);
     const int radius = MonitorUtil::DipToPx(fence_->style.cornerRadiusDip, dpi_);
-    const int border = std::max(4, MonitorUtil::DipToPx(6.0f, dpi_));
+    const int border = std::max(5, MonitorUtil::DipToPx(7.0f, dpi_));   // 缩放手柄宽
 
+    // ---- 八方向缩放（THICKFRAME 命中测试，系统自动给大小光标）----
+    const bool atL = p.x < border, atR = p.x >= w - border;
+    const bool atT = p.y < border, atB = p.y >= h - border;
+    if (atT && atL) return HTTOPLEFT;
+    if (atT && atR) return HTTOPRIGHT;
+    if (atB && atL) return HTBOTTOMLEFT;
+    if (atB && atR) return HTBOTTOMRIGHT;
+    if (atL) return HTLEFT;
+    if (atR) return HTRIGHT;
+    if (atT) return HTTOP;
+    if (atB) return HTBOTTOM;
+
+    // ---- 圆角外的角 → 点击穿透到桌面 ----
     auto cornerOutside = [&](int cx, int cy) {
         const double dx = p.x - cx, dy = p.y - cy;
         return dx * dx + dy * dy > (double)radius * radius;
@@ -525,10 +544,6 @@ LRESULT FenceWindow::OnNcHitTest(LPARAM lp)
         if (p.x >= w - radius && p.y >= h - radius && cornerOutside(w - radius, h - radius))
             return HTTRANSPARENT;
     }
-
-    if (p.x >= w - border && p.y >= h - border) return HTBOTTOMRIGHT;
-    if (p.x >= w - border) return HTRIGHT;
-    if (p.y >= h - border) return HTBOTTOM;
 
     if (p.y < titleH) return HTCAPTION;
     if (fence_->collapsed) return HTTRANSPARENT;

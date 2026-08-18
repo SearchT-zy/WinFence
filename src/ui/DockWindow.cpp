@@ -11,6 +11,7 @@
 #include "core/FenceService.h"
 #include "persist/ConfigStore.h"
 #include "shell/MonitorUtil.h"
+#include "ui/OrganizeHint.h"
 #include "ui/Compositor.h"
 #include "ui/DropTarget.h"
 #include "ui/FenceDrag.h"
@@ -88,6 +89,7 @@ bool DockWindow::Create(HINSTANCE instance, Workspace& ws, IconRegistry& icons,
             Relayout();
             RequestRender();
             ScheduleSave();
+            MaybeShowVirtualGroupingHint(hwnd_, *ws_, *store_);   // 首次拖入教育（一次）
         }
         return added;
     });

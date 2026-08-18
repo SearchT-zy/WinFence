@@ -162,4 +162,53 @@ void FenceService::DetachFromAll(Workspace& ws, IconUid uid)
     d.erase(std::remove(d.begin(), d.end(), uid), d.end());
 }
 
+bool FenceService::ApplyGroupPlan(Workspace& ws, const GroupPlan& plan)
+{
+    // 1) 快照当前归属（一键重置的依据，§6.5）
+    ws.aiBackup.present = true;
+    ws.aiBackup.fences.clear();
+    ws.aiBackup.dock = ws.dock.items;
+    for (const auto& f : ws.fences)
+        ws.aiBackup.fences.emplace_back(f.id, f.items);
+
+    // 2) 逐组：同名栅栏复用，否则新建（瀑布位）
+    for (size_t gi = 0; gi < plan.size(); ++gi) {
+        const auto& [title, uids] = plan[gi];
+        Fence* target = nullptr;
+        for (auto& f : ws.fences)
+            if (f.title == title) { target = &f; break; }
+        if (!target) {
+            Fence f;
+            f.id = ws.nextFenceId++;
+            f.title = title;
+            f.style = ws.defaultStyle;
+            f.posPx = {50 + (LONG)(gi % 4) * 340, 50 + (LONG)(gi / 4) * 360};
+            f.sizePx = {280, 320};
+            f.collapsedSizePx = {280, 40};
+            ws.fences.push_back(f);
+            target = &ws.fences.back();
+        }
+        for (IconUid uid : uids) {
+            DetachFromAll(ws, uid);
+            if (target->items.size() < 2000) target->items.push_back(uid);
+        }
+    }
+    return true;
+}
+
+bool FenceService::ResetAiGrouping(Workspace& ws)
+{
+    if (!ws.aiBackup.present) return false;
+    for (auto& f : ws.fences) f.items.clear();
+    ws.dock.items.clear();
+    for (const auto& [id, items] : ws.aiBackup.fences)
+        for (auto& f : ws.fences)
+            if (f.id == id) { f.items = items; break; }
+    ws.dock.items = ws.aiBackup.dock;
+    ws.aiBackup.present = false;
+    ws.aiBackup.fences.clear();
+    ws.aiBackup.dock.clear();
+    return true;
+}
+
 } // namespace winfence
