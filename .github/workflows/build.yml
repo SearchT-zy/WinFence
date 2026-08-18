@@ -7,7 +7,7 @@ on:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022   # 固定镜像（windows-latest 已切 2025，VS 实例发现问题）
     steps:
       - uses: actions/checkout@v4
 
