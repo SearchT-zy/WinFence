@@ -1,0 +1,23 @@
+# 构建产物
+build/
+build-*/
+out/
+cmake-build-*/
+
+# Visual Studio
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+CMakeSettings.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# 系统杂项
+Thumbs.db
+desktop.ini
+*.log
+.claude/

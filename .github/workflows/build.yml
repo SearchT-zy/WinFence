@@ -1,0 +1,34 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (VS2022 x64)
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build (Release)
+        run: cmake --build build --config Release
+
+      # DESIGN.md §4.9：AV 误报红线 —— 禁词出现在代码行即失败（注释豁免）
+      - name: Banned-API audit (DESIGN.md 4.9)
+        shell: pwsh
+        run: |
+          $hits = Get-ChildItem src -Recurse -Include *.cpp,*.h |
+            Select-String -Pattern 'SetWindowsHookEx|WriteProcessMemory|ReadProcessMemory|CreateRemoteThread|SetWindowsCompositionAttribute\s*\(' |
+            Where-Object { $_.Line -notmatch '^\s*(//|\*|#)' }
+          if ($hits) { $hits | Format-Table Path, LineNumber, Line; exit 1 }
+          "banned-api audit passed"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinFence-win64
+          path: build/Release/WinFence.exe

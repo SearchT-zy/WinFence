@@ -1,0 +1,42 @@
+// WinFence 资源：图标 + 版本信息 + 内嵌 manifest。
+// 注意：本文件保持纯 ASCII（rc.exe 代码页坑，DESIGN.md §4.3）。
+
+#define IDI_APP 101
+
+#include <windows.h>
+
+IDI_APP ICON "icons/app.ico"
+
+#define VER_FILEVERSION             0,1,0,0
+#define VER_FILEVERSION_STR         "0.1.0.0\0"
+
+1 RT_MANIFEST "../app.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    VER_FILEVERSION
+ PRODUCTVERSION VER_FILEVERSION
+ FILEFLAGSMASK  0x3fL
+ FILEFLAGS      0x0L
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_APP
+ FILESUBTYPE    0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"   // US English, Unicode
+        BEGIN
+            VALUE "CompanyName",      "WinFence Project"
+            VALUE "FileDescription",  "WinFence - open-source desktop icon fences"
+            VALUE "FileVersion",      VER_FILEVERSION_STR
+            VALUE "InternalName",     "WinFence"
+            VALUE "LegalCopyright",   "(C) 2026 WinFence Contributors. MIT License."
+            VALUE "OriginalFilename", "WinFence.exe"
+            VALUE "ProductName",      "WinFence"
+            VALUE "ProductVersion",   VER_FILEVERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

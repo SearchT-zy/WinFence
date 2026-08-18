@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity version="0.1.0.0" name="WinFence" type="win32"/>
+  <description>WinFence - open-source desktop icon fences</description>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <!-- 高分 DPI：PerMonitorV2 是多显示器混合缩放的前提（DESIGN.md §4.1） -->
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <!-- 进程代码页 UTF-8，配合 /utf-8 编译选项（DESIGN.md §4.3） -->
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+      <!-- 长路径支持，中文深目录场景（DESIGN.md §4.3） -->
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
+  <dependency>
+    <dependentAssembly>
+      <!-- 设置弹窗使用系统控件时需要 v6 通用控件 -->
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls"
+          version="6.0.0.0" processorArchitecture="*"
+          publicKeyToken="6595b64144ccf1df" language="*"/>
+    </dependentAssembly>
+  </dependency>
+</assembly>
