@@ -9,6 +9,10 @@
 
 namespace winfence {
 
+// 标题栏「＋」新建按钮热区（DIP，从右缘起）：与 FenceWindow 命中测试共用
+inline constexpr float kPlusZoneRightDip = 76.0f;
+inline constexpr float kPlusZoneWidthDip = 22.0f;
+
 class FenceRenderer {
 public:
     // 在 Compositor 提供的设备上下文上绘制一个栅栏（ctx 已 SetDpi，坐标 DIP）

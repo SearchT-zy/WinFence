@@ -140,12 +140,22 @@ void FenceRenderer::Draw(const Fence& f, const IconRegistry& icons, IconCache& c
     if (auto fmt = MakeFormat(dwrite, 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, false)) {
         fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         if (title) ctx->DrawTextW(f.title.c_str(), (UINT32)f.title.size(), fmt.Get(),
-                                  D2D1::RectF(22, 0, w - 52, titleH), title.Get());
+                                  D2D1::RectF(22, 0, w - 84, titleH), title.Get());
         wchar_t badge[32];
         int n = swprintf_s(badge, L"%zu", CountAlive(f, icons));
         if (n > 0 && faint)
             ctx->DrawTextW(badge, (UINT32)n, fmt.Get(),
                            D2D1::RectF(w - 48, 0, w - 14, titleH), faint.Get());
+    }
+    // 标题栏「＋」新建栅栏按钮（与 FenceWindow 热区共用常量）
+    if (accent) {
+        const float cx = w - kPlusZoneRightDip + kPlusZoneWidthDip / 2;
+        const float cy = titleH / 2;
+        const float arm = 4.5f;
+        ctx->DrawLine(D2D1::Point2F(cx - arm, cy), D2D1::Point2F(cx + arm, cy),
+                      accent.Get(), 1.6f);
+        ctx->DrawLine(D2D1::Point2F(cx, cy - arm), D2D1::Point2F(cx, cy + arm),
+                      accent.Get(), 1.6f);
     }
     if (!f.collapsed && hairline) {   // 标题下细分割线（不抵边）
         ctx->DrawLine(D2D1::Point2F(10, titleH), D2D1::Point2F(w - 10, titleH),

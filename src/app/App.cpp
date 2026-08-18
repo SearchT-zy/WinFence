@@ -211,8 +211,10 @@ bool App::EnsureAppWindow()
         (void)atom;   // 注册成功但创建失败（罕见），交由调用方提示
         return false;
     }
-    // 全局热键：Ctrl+Alt+N 新建栅栏（M7a：桌面空白处右键属 Explorer，热键补位）
-    RegisterHotKey(appHwnd_, 1, MOD_CONTROL | MOD_ALT, 'N');
+    // 全局热键：Ctrl+Alt+N 新建栅栏；被占用时回退 Ctrl+Alt+Shift+N
+    if (!RegisterHotKey(appHwnd_, 1, MOD_CONTROL | MOD_ALT, 'N')) {
+        RegisterHotKey(appHwnd_, 1, MOD_CONTROL | MOD_ALT | MOD_SHIFT, 'N');
+    }
     return true;
 }
 

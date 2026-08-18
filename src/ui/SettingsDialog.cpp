@@ -1,4 +1,4 @@
-// 中文设置弹窗实现（M7b：AI 智能分组区——唯一触发入口，仅手动点击）。
+// 中文设置弹窗实现（M7c 视觉重做：微软雅黑 + 分组框 + 白底净色 + 统一栅格）。
 // AI 请求在工作线程执行（WinHTTP 同步 60s 超时），结果经 kMsgAiDone 回投 UI 线程。
 #include "ui/SettingsDialog.h"
 
@@ -30,9 +30,10 @@ constexpr int kCtrlAiModel  = 108;
 constexpr int kCtrlAiKey    = 109;
 constexpr int kCtrlAiRun    = 110;
 constexpr int kCtrlAiReset  = 111;
-constexpr int kCtrlAiStatus = 112;
-constexpr int kLblOpacity   = 1100;
-constexpr int kLblRadius    = 1101;
+constexpr int kCtrlAiStatus = 113;
+constexpr int kGrpLook      = 120;
+constexpr int kGrpDesk      = 121;
+constexpr int kGrpAi        = 122;
 
 constexpr UINT kMsgAiDone = WM_APP + 7;   // AI 工作线程 → 设置窗口
 
@@ -85,6 +86,8 @@ struct DialogState {
     HWND btnAiRun = nullptr;
     HWND btnAiReset = nullptr;
     HWND lblAiStatus = nullptr;
+    HFONT font = nullptr;
+    HBRUSH whiteBrush = nullptr;
     HINSTANCE inst = nullptr;
     Workspace* ws = nullptr;
     const IconRegistry* icons = nullptr;
@@ -99,7 +102,17 @@ int S(int dip) { return (int)(dip * g_state.dpi / 96.0f + 0.5f); }
 
 void ApplyFont(HWND ctrl)
 {
-    SendMessageW(ctrl, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+    if (g_state.font) SendMessageW(ctrl, WM_SETFONT, (WPARAM)g_state.font, TRUE);
+}
+
+HWND MkCtrl(const wchar_t* cls, const wchar_t* text, DWORD style, int x, int y,
+            int w, int h, int id = 0)
+{
+    HWND c = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
+                             S(x), S(y), S(w), S(h), g_state.dlg,
+                             id ? (HMENU)(INT_PTR)id : nullptr, g_state.inst, nullptr);
+    ApplyFont(c);
+    return c;
 }
 
 void UpdateValueLabels()
@@ -107,9 +120,9 @@ void UpdateValueLabels()
     const int opacity = 20 + (int)SendMessageW(g_state.trackOpacity, TBM_GETPOS, 0, 0);
     const int radius  = (int)SendMessageW(g_state.trackRadius, TBM_GETPOS, 0, 0);
     wchar_t buf[64];
-    swprintf_s(buf, L"透明度：%d%%", opacity);
+    swprintf_s(buf, L"透明度 %d%%", opacity);
     SetWindowTextW(g_state.lblOpacity, buf);
-    swprintf_s(buf, L"圆角：%d", radius);
+    swprintf_s(buf, L"圆角 %d", radius);
     SetWindowTextW(g_state.lblRadius, buf);
 }
 
@@ -151,7 +164,6 @@ void ApplyAndSave()
 // ---- AI 整理：唯一入口（手动点击，§6.6）。工作线程跑网络，结果回投 ----
 void StartAiGrouping()
 {
-    // 保存 AI 设置（provider/model 进配置；Key 进 DPAPI 文件）
     const int provSel = (int)SendMessageW(g_state.cmbAiProv, CB_GETCURSEL, 0, 0);
     g_state.ws->ai.provider = (provSel == 1) ? L"ollama" : L"deepseek";
     wchar_t model[128]{}, key[256]{};
@@ -162,9 +174,8 @@ void StartAiGrouping()
         SaveApiKey(key);
 
     EnableWindow(g_state.btnAiRun, FALSE);
-    SetAiStatus(L"正在请求模型（最长 60 秒）…");
+    SetAiStatus(L"请求中…");
 
-    // 线程捕获副本（UI 对象生命周期不可跨线程）
     const HWND dlg = g_state.dlg;
     Workspace wsCopy;
     wsCopy.ai = g_state.ws->ai;
@@ -173,7 +184,7 @@ void StartAiGrouping()
     std::thread([dlg, wsCopy = std::move(wsCopy), iconsCopy = std::move(iconsCopy)]() {
         auto* result = new AiJobResult(RunAiGrouping(wsCopy, iconsCopy));
         if (!PostMessageW(dlg, kMsgAiDone, result->ok ? 1 : 0, (LPARAM)result))
-            delete result;   // 窗口已关：丢弃
+            delete result;
     }).detach();
 }
 
@@ -188,10 +199,10 @@ void OnAiDone(WPARAM wp, LPARAM lp)
                     MB_OK | MB_ICONWARNING);
         return;
     }
-    SetAiStatus(L"已生成，请预览确认");
+    SetAiStatus(L"已生成");
     AiPreviewDialog::Show(g_state.inst, g_state.dlg, *g_state.ws, *g_state.icons,
                           *g_state.store, result->groups, [] {
-                              if (g_state.onApplied) g_state.onApplied();   // 刷新栅栏/Dock
+                              if (g_state.onApplied) g_state.onApplied();
                           });
 }
 
@@ -206,6 +217,12 @@ LRESULT CALLBACK DlgProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             UpdateValueLabels();
         return 0;
 
+    case WM_CTLCOLORSTATIC:   // 白底 + 深灰文字（含分组框/标签）
+        SetBkColor((HDC)wp, RGB(255, 255, 255));
+        SetTextColor((HDC)wp, RGB(56, 56, 60));
+        if (g_state.whiteBrush) return (LRESULT)g_state.whiteBrush;
+        break;
+
     case WM_COMMAND:
         if (HIWORD(wp) == BN_CLICKED) {
             if (LOWORD(wp) == kCtrlApply) { ApplyAndSave(); return 0; }
@@ -215,17 +232,16 @@ LRESULT CALLBACK DlgProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                     FenceService::ResetAiGrouping(*g_state.ws);
                     g_state.store->ScheduleSave();
                     if (g_state.onApplied) g_state.onApplied();
-                    SetAiStatus(L"已恢复 AI 分组前的布局");
+                    SetAiStatus(L"已重置");
                 } else {
-                    SetAiStatus(L"没有可重置的 AI 分组");
+                    SetAiStatus(L"无可重置");
                 }
                 return 0;
             }
         }
         if (HIWORD(wp) == CBN_SELCHANGE && LOWORD(wp) == kCtrlAiProv) {
-            // Ollama 本地无需 Key
             const int sel = (int)SendMessageW(g_state.cmbAiProv, CB_GETCURSEL, 0, 0);
-            EnableWindow(g_state.edtAiKey, sel == 0);
+            EnableWindow(g_state.edtAiKey, sel == 0);   // Ollama 本地无需 Key
             return 0;
         }
         if (LOWORD(wp) == IDCANCEL) {
@@ -275,7 +291,7 @@ void SettingsDialog::ShowSingle(HINSTANCE instance, Workspace& ws,
         wc.lpfnWndProc   = &DlgProc;
         wc.hInstance     = instance;
         wc.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
-        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+        wc.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);   // 净白底
         wc.lpszClassName = kClass;
         RegisterClassExW(&wc);
         classRegistered = true;
@@ -286,150 +302,95 @@ void SettingsDialog::ShowSingle(HINSTANCE instance, Workspace& ws,
     g_state.store = &store;
     g_state.inst  = instance;
     g_state.onApplied = std::move(onApplied);
+    if (!g_state.font)
+        g_state.font = CreateFontW(-12, 0, 0, 0, FW_NORMAL, 0, 0, 0,
+                                   DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY,
+                                   DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+    if (!g_state.whiteBrush)
+        g_state.whiteBrush = CreateSolidBrush(RGB(255, 255, 255));
 
-    const int w = S(320), h = S(560);
+    const int w = S(340), h = S(500);
     RECT wa{};
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
-    int x = wa.left + (wa.right - wa.left - w) / 2;
-    int y = wa.top + (wa.bottom - wa.top - h) / 2;
-
     g_state.dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kClass, L"WinFence 设置",
                                   WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
-                                  x, y, w, h, nullptr, nullptr, instance, nullptr);
+                                  wa.left + (wa.right - wa.left - w) / 2,
+                                  wa.top + (wa.bottom - wa.top - h) / 2,
+                                  w, h, nullptr, nullptr, instance, nullptr);
     if (!g_state.dlg) return;
     g_state.dpi = GetDpiForWindow(g_state.dlg);
     if (!g_state.dpi) g_state.dpi = 96;
+    SendMessageW(g_state.dlg, WM_SETFONT, (WPARAM)g_state.font, TRUE);
 
-    // ---- 样式区 ----
-    HWND label = CreateWindowExW(0, L"STATIC", L"背景效果：", WS_CHILD | WS_VISIBLE,
-                                 S(16), S(18), S(70), S(20),
-                                 g_state.dlg, nullptr, instance, nullptr);
-    ApplyFont(label);
-    g_state.combo = CreateWindowExW(0, L"COMBOBOX", L"",
-                                    WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
-                                    S(92), S(16), S(200), S(100),
-                                    g_state.dlg, (HMENU)(INT_PTR)kCtrlCombo, instance, nullptr);
-    ApplyFont(g_state.combo);
+    // ════ 分组一：外观 ════
+    MkCtrl(L"BUTTON", L"外观", BS_GROUPBOX, 12, 8, 304, 150, kGrpLook);
+    MkCtrl(L"STATIC", L"背景效果", SS_LEFT, 26, 32, 56, 18);
+    g_state.combo = MkCtrl(L"COMBOBOX", L"", CBS_DROPDOWNLIST, 88, 28, 212, 100, kCtrlCombo);
     ComboBox_AddString(g_state.combo, L"亚克力（Win11 毛玻璃）");
     ComboBox_AddString(g_state.combo, L"半透明");
     ComboBox_AddString(g_state.combo, L"无");
 
-    g_state.lblOpacity = CreateWindowExW(0, L"STATIC", L"透明度：", WS_CHILD | WS_VISIBLE,
-                                         S(16), S(60), S(120), S(20),
-                                         g_state.dlg, nullptr, instance, nullptr);
-    ApplyFont(g_state.lblOpacity);
-    g_state.trackOpacity = CreateWindowExW(0, TRACKBAR_CLASSW, L"",
-                                           WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_AUTOTICKS,
-                                           S(16), S(84), S(282), S(30),
-                                           g_state.dlg, (HMENU)(INT_PTR)kCtrlOpacity, instance, nullptr);
+    g_state.lblOpacity = MkCtrl(L"STATIC", L"透明度", SS_LEFT, 26, 68, 80, 18);
+    g_state.trackOpacity = MkCtrl(L"BUTTON", L"", TBS_HORZ, 26, 88, 274, 26, kCtrlOpacity);
     SendMessageW(g_state.trackOpacity, TBM_SETRANGE, TRUE, MAKELPARAM(0, 80));
     SendMessageW(g_state.trackOpacity, TBM_SETPOS, TRUE,
                  (int)(ws.defaultStyle.opacity * 100) - 20);
 
-    g_state.lblRadius = CreateWindowExW(0, L"STATIC", L"圆角：", WS_CHILD | WS_VISIBLE,
-                                        S(16), S(124), S(120), S(20),
-                                        g_state.dlg, nullptr, instance, nullptr);
-    ApplyFont(g_state.lblRadius);
-    g_state.trackRadius = CreateWindowExW(0, TRACKBAR_CLASSW, L"",
-                                          WS_CHILD | WS_VISIBLE | TBS_HORZ,
-                                          S(16), S(148), S(282), S(30),
-                                          g_state.dlg, (HMENU)(INT_PTR)kCtrlRadius, instance, nullptr);
+    g_state.lblRadius = MkCtrl(L"STATIC", L"圆角", SS_LEFT, 26, 116, 80, 18);
+    g_state.trackRadius = MkCtrl(L"BUTTON", L"", TBS_HORZ, 26, 134, 274, 26, kCtrlRadius);
     SendMessageW(g_state.trackRadius, TBM_SETRANGE, TRUE, MAKELPARAM(0, 24));
     SendMessageW(g_state.trackRadius, TBM_SETPOS, TRUE,
                  (int)ws.defaultStyle.cornerRadiusDip);
 
-    // ---- 开关区 ----
-    g_state.chkDock = CreateWindowExW(0, L"BUTTON", L"启用 Dock 栏（屏幕底部）",
-                                      WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                                      S(16), S(192), S(280), S(22),
-                                      g_state.dlg, (HMENU)(INT_PTR)kCtrlDock, instance, nullptr);
-    ApplyFont(g_state.chkDock);
+    // ════ 分组二：桌面 ════
+    MkCtrl(L"BUTTON", L"桌面", BS_GROUPBOX, 12, 164, 304, 96, kGrpDesk);
+    g_state.chkDock = MkCtrl(L"BUTTON", L"启用 Dock 栏（屏幕底部）",
+                             BS_AUTOCHECKBOX, 26, 186, 272, 20, kCtrlDock);
     SendMessageW(g_state.chkDock, BM_SETCHECK,
                  ws.dock.visible ? BST_CHECKED : BST_UNCHECKED, 0);
-
-    g_state.chkHideDesk = CreateWindowExW(
-        0, L"BUTTON", L"隐藏桌面图标（清空桌面，需重启资源管理器）",
-        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        S(16), S(220), S(290), S(22),
-        g_state.dlg, (HMENU)(INT_PTR)kCtrlHideDesk, instance, nullptr);
-    ApplyFont(g_state.chkHideDesk);
+    g_state.chkHideDesk = MkCtrl(L"BUTTON", L"隐藏桌面图标（需重启资源管理器）",
+                                 BS_AUTOCHECKBOX, 26, 210, 278, 20, kCtrlHideDesk);
     SendMessageW(g_state.chkHideDesk, BM_SETCHECK,
                  IsHideDesktopIcons() ? BST_CHECKED : BST_UNCHECKED, 0);
-
-    g_state.chkAutoRun = CreateWindowExW(0, L"BUTTON", L"开机自动启动 WinFence",
-                                         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                                         S(16), S(248), S(280), S(22),
-                                         g_state.dlg, (HMENU)(INT_PTR)kCtrlAutoRun, instance, nullptr);
-    ApplyFont(g_state.chkAutoRun);
+    g_state.chkAutoRun = MkCtrl(L"BUTTON", L"开机自动启动 WinFence",
+                                BS_AUTOCHECKBOX, 26, 234, 272, 20, kCtrlAutoRun);
     SendMessageW(g_state.chkAutoRun, BM_SETCHECK,
                  IsAutostartEnabled() ? BST_CHECKED : BST_UNCHECKED, 0);
 
-    // ---- AI 分组区（M7b：仅手动触发，只上传文件名）----
-    HWND aiLabel = CreateWindowExW(0, L"STATIC",
-                                   L"AI 智能分组（仅手动触发 · 只上传文件名，不含路径与内容）",
-                                   WS_CHILD | WS_VISIBLE,
-                                   S(16), S(284), S(300), S(20),
-                                   g_state.dlg, nullptr, instance, nullptr);
-    ApplyFont(aiLabel);
-
-    HWND provLabel = CreateWindowExW(0, L"STATIC", L"服务：", WS_CHILD | WS_VISIBLE,
-                                     S(16), S(310), S(40), S(20),
-                                     g_state.dlg, nullptr, instance, nullptr);
-    ApplyFont(provLabel);
-    g_state.cmbAiProv = CreateWindowExW(0, L"COMBOBOX", L"",
-                                        WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
-                                        S(60), S(308), S(150), S(100),
-                                        g_state.dlg, (HMENU)(INT_PTR)kCtrlAiProv, instance, nullptr);
-    ApplyFont(g_state.cmbAiProv);
+    // ════ 分组三：AI 智能分组 ════
+    MkCtrl(L"BUTTON", L"AI 智能分组（仅手动触发 · 只上传文件名）",
+           BS_GROUPBOX, 12, 266, 304, 150, kGrpAi);
+    MkCtrl(L"STATIC", L"服务", SS_LEFT, 26, 290, 32, 18);
+    g_state.cmbAiProv = MkCtrl(L"COMBOBOX", L"", CBS_DROPDOWNLIST, 62, 286, 110, 100, kCtrlAiProv);
     ComboBox_AddString(g_state.cmbAiProv, L"DeepSeek 云端");
     ComboBox_AddString(g_state.cmbAiProv, L"Ollama 本地");
     ComboBox_SetCurSel(g_state.cmbAiProv, ws.ai.provider == L"ollama" ? 1 : 0);
 
-    HWND modelLabel = CreateWindowExW(0, L"STATIC", L"模型：", WS_CHILD | WS_VISIBLE,
-                                      S(16), S(338), S(40), S(20),
-                                      g_state.dlg, nullptr, instance, nullptr);
-    ApplyFont(modelLabel);
-    g_state.edtAiModel = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT",
-                                         ws.ai.model.c_str(),
-                                         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-                                         S(60), S(336), S(238), S(22),
-                                         g_state.dlg, (HMENU)(INT_PTR)kCtrlAiModel, instance, nullptr);
-    ApplyFont(g_state.edtAiModel);
+    MkCtrl(L"STATIC", L"模型", SS_LEFT, 180, 290, 32, 18);
+    g_state.edtAiModel = MkCtrl(L"EDIT", ws.ai.model.c_str(),
+                                ES_AUTOHSCROLL | WS_BORDER, 216, 286, 84, 22, kCtrlAiModel);
     SendMessageW(g_state.edtAiModel, EM_SETCUEBANNER, TRUE,
-                 (LPARAM)L"留空=默认（deepseek-chat / qwen2.5:7b）");
+                 (LPARAM)L"留空=默认");
 
-    HWND keyLabel = CreateWindowExW(0, L"STATIC", L"Key：", WS_CHILD | WS_VISIBLE,
-                                    S(16), S(366), S(40), S(20),
-                                    g_state.dlg, nullptr, instance, nullptr);
-    ApplyFont(keyLabel);
-    g_state.edtAiKey = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-                                       WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_PASSWORD,
-                                       S(60), S(364), S(238), S(22),
-                                       g_state.dlg, (HMENU)(INT_PTR)kCtrlAiKey, instance, nullptr);
-    ApplyFont(g_state.edtAiKey);
+    MkCtrl(L"STATIC", L"API Key", SS_LEFT, 26, 318, 48, 18);
+    g_state.edtAiKey = MkCtrl(L"EDIT", L"",
+                              ES_AUTOHSCROLL | ES_PASSWORD | WS_BORDER,
+                              80, 314, 220, 22, kCtrlAiKey);
     EnableWindow(g_state.edtAiKey, ws.ai.provider != L"ollama");
 
-    g_state.btnAiRun = CreateWindowExW(0, L"BUTTON", L"AI 整理",
-                                       WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                       S(16), S(396), S(90), S(28),
-                                       g_state.dlg, (HMENU)(INT_PTR)kCtrlAiRun, instance, nullptr);
-    ApplyFont(g_state.btnAiRun);
-    g_state.btnAiReset = CreateWindowExW(0, L"BUTTON", L"重置 AI 分组",
-                                         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                         S(114), S(396), S(110), S(28),
-                                         g_state.dlg, (HMENU)(INT_PTR)kCtrlAiReset, instance, nullptr);
-    ApplyFont(g_state.btnAiReset);
-    g_state.lblAiStatus = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE,
-                                          S(232), S(402), S(80), S(20),
-                                          g_state.dlg, nullptr, instance, nullptr);
-    ApplyFont(g_state.lblAiStatus);
+    g_state.btnAiRun = MkCtrl(L"BUTTON", L"AI 整理", BS_PUSHBUTTON,
+                              26, 348, 86, 28, kCtrlAiRun);
+    g_state.btnAiReset = MkCtrl(L"BUTTON", L"重置 AI 分组", BS_PUSHBUTTON,
+                                120, 348, 104, 28, kCtrlAiReset);
+    g_state.lblAiStatus = MkCtrl(L"STATIC", L"", SS_LEFT, 232, 354, 76, 18, kCtrlAiStatus);
 
-    // ---- 应用按钮 ----
-    HWND apply = CreateWindowExW(0, L"BUTTON", L"应用并保存",
-                                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                 S(16), S(440), S(110), S(30),
-                                 g_state.dlg, (HMENU)(INT_PTR)kCtrlApply, instance, nullptr);
-    ApplyFont(apply);
+    MkCtrl(L"STATIC",
+           L"整理完成后先预览确认再应用；应用前自动备份，可一键重置。",
+           SS_LEFT, 26, 384, 280, 18);
+
+    // ════ 应用按钮（默认按钮样式，右下） ════
+    HWND apply = MkCtrl(L"BUTTON", L"应用并保存", BS_DEFPUSHBUTTON,
+                        198, 426, 118, 32, kCtrlApply);
 
     int sel = 0;
     if (ws.defaultStyle.backdrop == BackdropType::Translucent) sel = 1;
@@ -439,6 +400,7 @@ void SettingsDialog::ShowSingle(HINSTANCE instance, Workspace& ws,
 
     ShowWindow(g_state.dlg, SW_SHOWNORMAL);
     UpdateWindow(g_state.dlg);
+    (void)apply;
 }
 
 void SettingsDialog::CloseIfOpen()

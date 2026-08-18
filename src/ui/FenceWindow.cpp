@@ -303,6 +303,20 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
     }
 
     case WM_LBUTTONUP: {
+        // 标题栏「＋」：新建栅栏（热区为 HTCLIENT，见 OnNcHitTest）
+        if (!dragging_ && pressUid_ == 0) {
+            POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            RECT rc{};
+            GetClientRect(hwnd_, &rc);
+            const int titleH = MonitorUtil::DipToPx(fence_->style.titleBarHeightDip, dpi_);
+            const int zoneW = MonitorUtil::DipToPx(kPlusZoneWidthDip, dpi_);
+            const int zoneR = MonitorUtil::DipToPx(kPlusZoneRightDip, dpi_);
+            if (pt.y < titleH && pt.x >= rc.right - zoneR &&
+                pt.x < rc.right - zoneR + zoneW) {
+                if (onAction_) onAction_(AppAction::NewFence, 0);
+                return 0;
+            }
+        }
         if (dragging_) {   // 落子：跨栏/Dock 移动 / 栏内保留新序 / 栏外取消还原
             ReleaseCapture();
             auto& d = FenceDrag::Get();
@@ -516,6 +530,14 @@ LRESULT FenceWindow::OnNcHitTest(LPARAM lp)
     const int titleH = MonitorUtil::DipToPx(fence_->style.titleBarHeightDip, dpi_);
     const int radius = MonitorUtil::DipToPx(fence_->style.cornerRadiusDip, dpi_);
     const int border = std::max(5, MonitorUtil::DipToPx(7.0f, dpi_));   // 缩放手柄宽
+
+    // ---- 标题栏「＋」新建按钮热区（优先于标题拖动）----
+    {
+        const int zoneW = MonitorUtil::DipToPx(kPlusZoneWidthDip, dpi_);
+        const int zoneR = MonitorUtil::DipToPx(kPlusZoneRightDip, dpi_);
+        if (p.y < titleH && p.x >= w - zoneR && p.x < w - zoneR + zoneW)
+            return HTCLIENT;
+    }
 
     // ---- 八方向缩放（THICKFRAME 命中测试，系统自动给大小光标）----
     const bool atL = p.x < border, atR = p.x >= w - border;
