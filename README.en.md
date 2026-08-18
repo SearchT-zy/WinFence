@@ -4,30 +4,40 @@
 
 ---
 
-Open-source desktop icon fences (à la Stardock Fences) plus a macOS-style Dock for Windows 10/11 — group your desktop icons into draggable, collapsible acrylic-glass rounded containers, or pin them to a translucent black dock at the bottom of the screen with hover magnification and single-click launch. **Your real files are never moved.**
+Open-source desktop icon fences (à la Stardock Fences) plus a macOS-style Dock for Windows 10/11 — group your desktop icons into draggable, resizable, collapsible tech-style (HUD) glass containers, or pin them to a translucent dock with hover magnification and single-click launch. **Your real files are never moved.**
 
-![status](https://img.shields.io/badge/status-v0.1.0%20M6-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![c++](https://img.shields.io/badge/C%2B%2B-Win32%20%2F%20D2D%20%2F%20DComp-orange)
+![release](https://img.shields.io/badge/release-v0.1.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![c++](https://img.shields.io/badge/C%2B%2B-Win32%20%2F%20D2D%20%2F%20DComp-orange)
+
+**[⬇ Download v0.1.0](https://github.com/SearchT-zy/WinFence/releases/latest)** (portable zip, no dependencies)
 
 ## Features
 
 ### Fences
-- ✅ Multiple acrylic rounded translucent containers (Win11 `DWMSBT` system backdrop, graceful fallback on older systems), layered above desktop icons but below app windows
-- ✅ Drag to move / edge resize / double-click to roll up (150 ms animation) / content scrolling
-- ✅ Drop icons in from the desktop or Explorer (**virtual grouping** — files stay where they are)
-- ✅ Double-click to open, right-click to remove; drag between fences, live reorder, drop-target highlight
-- ✅ Inline fence rename; icon hover highlight
-- ✅ Crisp 256 px icons (`SHIL_JUMBO`) with full CJK filename support
+- ✅ Tech/HUD visual language: dark blue-black gradient, neon dual-stroke border with outer glow, corner brackets
+- ✅ Acrylic glass (Win11 `DWMSBT` system backdrop, graceful fallback), above desktop icons, below app windows
+- ✅ Move / **resize from all 8 edges** / double-click roll-up (150 ms animation) / content scrolling
+- ✅ "＋" button on the title bar to create a fence instantly; inline rename; hover highlight
+- ✅ Global hotkey **Ctrl+Alt+N** (auto-fallback to Ctrl+Alt+Shift+N if taken)
+- ✅ Drop icons in from the desktop or Explorer (**virtual grouping**); drag between fences; live reorder
+- ✅ Double-click to open, right-click to remove; crisp 256 px icons (`SHIL_JUMBO`) with full CJK filename support
 
 ### Dock (macOS-style)
-- ✅ Translucent black rounded bar, bottom-center, always on top
+- ✅ Translucent black rounded bar (same tech style), bottom-center, always on top
 - ✅ Hover magnification + name bubble; single-click launch
-- ✅ Two-way drag with fences, in-dock reorder, hide on demand
+- ✅ Two-way drag with fences, in-dock reorder, right-click remove/hide
+
+### AI grouping
+- ✅ Dual backends: **DeepSeek cloud** (API key stored DPAPI-encrypted) / **local Ollama** (data never leaves the machine)
+- ✅ **Manual trigger only** (the "AI 整理" button) — nothing runs automatically
+- ✅ Privacy: uploads only filenames/extensions/kinds — **no paths, no file contents**
+- ✅ Strict JSON validation: hallucinated or duplicated uids invalidate the whole plan — never partially applied
+- ✅ **Preview before apply**; automatic backup before applying; one-click reset
 
 ### System integration
 - ✅ JSON layout persistence (atomic writes + `.bak` rotation, monitor-normalized coordinates, multi-DPI / multi-monitor safe)
 - ✅ Live desktop sync: create / delete / rename automatically reconciled (renames migrate membership, orphans kept 7 days)
-- ✅ Tray menu + settings dialog in Chinese (backdrop, opacity, corner radius, Dock toggle, hide desktop icons, autostart)
-- 🚧 Planned: AI grouping (DeepSeek API / local Ollama, manual trigger only, filenames only)
+- ✅ **Fully D2D-drawn settings panel** (pill buttons / glowing sliders / toggles, live apply) + tray menu
+- ✅ Hide desktop icons (clean desktop), autostart
 
 ### Safety by design
 
@@ -46,7 +56,7 @@ cmake --build build --config Release
 # Output: build\Release\WinFence.exe (static CRT, portable single file)
 ```
 
-Or grab a prebuilt binary from the GitHub Actions artifacts.
+Or grab a prebuilt binary from [Releases](https://github.com/SearchT-zy/WinFence/releases/latest).
 
 ## Documentation
 
