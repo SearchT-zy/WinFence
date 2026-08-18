@@ -70,11 +70,12 @@ size_t CountAlive(const Fence& f, const IconRegistry& icons)
 }
 
 ComPtr<IDWriteTextFormat> MakeFormat(IDWriteFactory* dw, float size,
-                                     DWRITE_FONT_WEIGHT weight, bool ellipsis)
+                                     DWRITE_FONT_WEIGHT weight, bool ellipsis,
+                                     const wchar_t* family = L"Microsoft YaHei UI")
 {
     ComPtr<IDWriteTextFormat> fmt;
     if (SUCCEEDED(dw->CreateTextFormat(
-            L"Microsoft YaHei UI", nullptr, weight,
+            family, nullptr, weight,
             DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             size, L"zh-CN", &fmt))) {
         if (ellipsis) {
@@ -109,14 +110,23 @@ void FenceRenderer::Draw(const Fence& f, const IconRegistry& icons, IconCache& c
 
     ctx->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
 
-    // ---- 整块连续毛玻璃（无标题色带，视觉一体化）----
-    // 微蓝深灰调；亚克力模式下低 alpha 让系统模糊主导质感
+    // ---- 科技风皮肤：深蓝黑竖向渐变底（亚克力时低 alpha 透出系统模糊）----
     const FLOAT baseAlpha = acrylicActive ? 0.42f : st.opacity;
-    ComPtr<ID2D1SolidColorBrush> bg;
-    if (SUCCEEDED(ctx->CreateSolidColorBrush(
-            D2D1::ColorF(0.10f, 0.11f, 0.15f, baseAlpha), &bg))) {
-        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(0, 0, w, h), radius, radius);
-        ctx->FillRoundedRectangle(rr, bg.Get());
+    {
+        ComPtr<ID2D1GradientStopCollection> stops;
+        D2D1_GRADIENT_STOP gs[2] = {
+            {0.0f, D2D1::ColorF(0.13f, 0.16f, 0.23f, baseAlpha)},
+            {1.0f, D2D1::ColorF(0.05f, 0.065f, 0.11f, baseAlpha * 0.96f)}};
+        if (SUCCEEDED(ctx->CreateGradientStopCollection(gs, 2, &stops))) {
+            ComPtr<ID2D1LinearGradientBrush> bg;
+            D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp{D2D1::Point2F(0, 0),
+                                                     D2D1::Point2F(0, h)};
+            if (SUCCEEDED(ctx->CreateLinearGradientBrush(gp, stops.Get(), &bg))) {
+                D2D1_ROUNDED_RECT rr =
+                    D2D1::RoundedRect(D2D1::RectF(0, 0, w, h), radius, radius);
+                ctx->FillRoundedRectangle(rr, bg.Get());
+            }
+        }
     }
 
     // ---- 标题行：左侧 3px 身份色条 + 小字标题 + 右侧计数 ----
@@ -141,11 +151,16 @@ void FenceRenderer::Draw(const Fence& f, const IconRegistry& icons, IconCache& c
         fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         if (title) ctx->DrawTextW(f.title.c_str(), (UINT32)f.title.size(), fmt.Get(),
                                   D2D1::RectF(22, 0, w - 84, titleH), title.Get());
+    }
+    // 计数：等宽字体（科技感 HUD 数字）
+    if (auto mono = MakeFormat(dwrite, 12.0f, DWRITE_FONT_WEIGHT_NORMAL, false,
+                               L"Consolas")) {
+        mono->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         wchar_t badge[32];
         int n = swprintf_s(badge, L"%zu", CountAlive(f, icons));
-        if (n > 0 && faint)
-            ctx->DrawTextW(badge, (UINT32)n, fmt.Get(),
-                           D2D1::RectF(w - 48, 0, w - 14, titleH), faint.Get());
+        if (n > 0 && accent)
+            ctx->DrawTextW(badge, (UINT32)n, mono.Get(),
+                           D2D1::RectF(w - 48, 0, w - 14, titleH), accent.Get());
     }
     // 标题栏「＋」新建栅栏按钮（与 FenceWindow 热区共用常量）
     if (accent) {
@@ -157,9 +172,12 @@ void FenceRenderer::Draw(const Fence& f, const IconRegistry& icons, IconCache& c
         ctx->DrawLine(D2D1::Point2F(cx, cy - arm), D2D1::Point2F(cx, cy + arm),
                       accent.Get(), 1.6f);
     }
-    if (!f.collapsed && hairline) {   // 标题下细分割线（不抵边）
-        ctx->DrawLine(D2D1::Point2F(10, titleH), D2D1::Point2F(w - 10, titleH),
-                      hairline.Get(), 1.0f);
+    if (!f.collapsed) {   // 标题下分隔线：霓虹青微光
+        ComPtr<ID2D1SolidColorBrush> sep;
+        if (SUCCEEDED(ctx->CreateSolidColorBrush(
+                D2D1::ColorF(st.accent.r, st.accent.g, st.accent.b, 0.25f), &sep)))
+            ctx->DrawLine(D2D1::Point2F(10, titleH), D2D1::Point2F(w - 10, titleH),
+                          sep.Get(), 1.0f);
     }
 
     // ---- 图标网格：悬停高亮 + 图标 + 文件名 ----
@@ -234,20 +252,31 @@ void FenceRenderer::Draw(const Fence& f, const IconRegistry& icons, IconCache& c
         }
     }
 
-    // ---- 边框：常态细线；拖拽悬停目标 = 身份色加亮描边 ----
-    if (dropTarget && accent) {
-        D2D1_ROUNDED_RECT glow = D2D1::RoundedRect(
-            D2D1::RectF(0, 0, w, h), radius, radius);
-        ctx->DrawRoundedRectangle(glow, accent.Get(),
-                                  std::max(2.0f, 2.0f * dpi / 96.0f));
-    } else {
-        ComPtr<ID2D1SolidColorBrush> border;
-        if (SUCCEEDED(ctx->CreateSolidColorBrush(
-                D2D1::ColorF(st.border.r, st.border.g, st.border.b,
-                             std::min(st.border.a, 0.25f)), &border))) {
-            D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(0, 0, w, h), radius, radius);
-            ctx->DrawRoundedRectangle(rr, border.Get(),
-                                      std::max(1.0f, (FLOAT)dpi / 96.0f));
+    // ---- 科技风边框：外发光（低 alpha 粗描边）+ 霓虹主描边 + HUD 四角括号 ----
+    {
+        ComPtr<ID2D1SolidColorBrush> glow, neon;
+        ctx->CreateSolidColorBrush(
+            D2D1::ColorF(st.accent.r, st.accent.g, st.accent.b,
+                         dropTarget ? 0.30f : 0.14f), &glow);
+        ctx->CreateSolidColorBrush(
+            D2D1::ColorF(st.accent.r, st.accent.g, st.accent.b,
+                         dropTarget ? 0.95f : 0.65f), &neon);
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(0, 0, w, h), radius, radius);
+        if (glow) ctx->DrawRoundedRectangle(rr, glow.Get(), 5.0f);
+        if (neon) ctx->DrawRoundedRectangle(rr, neon.Get(), 1.5f);
+
+        // HUD 四角括号（L 形短线）
+        if (neon) {
+            const float inset = 5.0f, arm = 11.0f;
+            struct C { float x, y, dx, dy; };
+            const C cs[4] = {{inset, inset, 1, 1}, {w - inset, inset, -1, 1},
+                             {inset, h - inset, 1, -1}, {w - inset, h - inset, -1, -1}};
+            for (const auto& c : cs) {
+                ctx->DrawLine(D2D1::Point2F(c.x, c.y),
+                              D2D1::Point2F(c.x + c.dx * arm, c.y), neon.Get(), 2.0f);
+                ctx->DrawLine(D2D1::Point2F(c.x, c.y),
+                              D2D1::Point2F(c.x, c.y + c.dy * arm), neon.Get(), 2.0f);
+            }
         }
     }
 }

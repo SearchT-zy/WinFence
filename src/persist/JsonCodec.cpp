@@ -154,7 +154,12 @@ FenceStyle StyleFrom(const json& j, const FenceStyle& def)
     }
     ColorF c{};
     if (j.contains("accent") && j["accent"].is_string() &&
-        HexToColor(j["accent"].get<std::string>(), c)) st.accent = c;
+        HexToColor(j["accent"].get<std::string>(), c)) {
+        // 旧默认主题色自动升级为科技风霓虹青（#8CBFFF → #3EC9F5）
+        if (j["accent"].get<std::string>() == "#8CBFFF")
+            c = {0.243f, 0.788f, 0.961f, 1.0f};
+        st.accent = c;
+    }
     if (j.contains("border") && j["border"].is_string() &&
         HexToColor(j["border"].get<std::string>(), c)) st.border = c;
     return st;

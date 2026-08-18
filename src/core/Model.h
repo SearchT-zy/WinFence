@@ -48,7 +48,7 @@ struct FenceStyle {
     float          opacity  = 0.65f;     // 合法范围 0.2~1.0（JsonCodec 校验）
     float          cornerRadiusDip = 8.0f;
     float          titleBarHeightDip = 32.0f;
-    ColorF         accent  {0.55f, 0.75f, 0.95f, 1.0f};
+    ColorF         accent  {0.243f, 0.788f, 0.961f, 1.0f};   // 霓虹青 #3EC9F5（科技风）
     ColorF         border  {1.0f, 1.0f, 1.0f, 0.35f};
     // 字体族固定 "Microsoft YaHei UI"，不做配置项
 };

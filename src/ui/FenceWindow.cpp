@@ -33,6 +33,7 @@ constexpr UINT kMenuOpenItem    = 100;   // 打开图标
 constexpr UINT kMenuRemoveItem  = 101;   // 从此栅栏移除
 constexpr UINT kMenuNewFence    = 200;
 constexpr UINT kMenuRenameFence = 203;   // 重命名栅栏
+constexpr UINT kMenuSettings    = 204;   // 设置…
 constexpr UINT kMenuDeleteFence = 201;
 constexpr UINT kMenuExit        = 202;
 
@@ -626,6 +627,7 @@ void FenceWindow::ShowContextMenu(POINT screenPt)
     }
     AppendMenuW(menu, MF_STRING, kMenuNewFence, L"新建栅栏");
     AppendMenuW(menu, MF_STRING, kMenuRenameFence, L"重命名栅栏");
+    AppendMenuW(menu, MF_STRING, kMenuSettings, L"设置…");
     AppendMenuW(menu, MF_STRING, kMenuDeleteFence, L"删除此栅栏");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kMenuExit, L"退出 WinFence");
@@ -650,6 +652,9 @@ void FenceWindow::ShowContextMenu(POINT screenPt)
         break;
     case kMenuRenameFence:
         StartRename();
+        break;
+    case kMenuSettings:
+        if (onAction_) onAction_(AppAction::Settings, 0);
         break;
     case kMenuDeleteFence:
         if (onAction_) onAction_(AppAction::DeleteFence, fence_->id);

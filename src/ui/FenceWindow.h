@@ -15,7 +15,7 @@ class ConfigStore;
 class IconCache;
 
 // 窗口 → App 的动作回调（创建/删除栅栏涉及窗口生命周期，归 App 管）
-enum class AppAction { NewFence, DeleteFence, Exit };
+enum class AppAction { NewFence, DeleteFence, Settings, Exit };
 using ActionHandler = std::function<void(AppAction, FenceId)>;
 
 class FenceWindow {

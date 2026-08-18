@@ -155,20 +155,48 @@ void DockWindow::Draw()
 
     ctx->Clear(D2D1::ColorF(0, 0, 0, 0));
 
-    // ---- 黑色半透明圆角条 ----
-    ComPtr<ID2D1SolidColorBrush> bar;
-    if (SUCCEEDED(ctx->CreateSolidColorBrush(
-            D2D1::ColorF(0.05f, 0.05f, 0.07f, 0.55f), &bar))) {
-        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(0, 0, w, h),
-                                                 kRadius, kRadius);
-        ctx->FillRoundedRectangle(rr, bar.Get());
+    // ---- 科技风：深蓝黑渐变底 + 霓虹描边 + 外发光 + HUD 括号（与栅栏同语言）----
+    const D2D1_COLOR_F accentC = D2D1::ColorF(ws_->defaultStyle.accent.r,
+                                              ws_->defaultStyle.accent.g,
+                                              ws_->defaultStyle.accent.b, 1.0f);
+    {
+        ComPtr<ID2D1GradientStopCollection> stops;
+        D2D1_GRADIENT_STOP gs[2] = {
+            {0.0f, D2D1::ColorF(0.13f, 0.16f, 0.23f, 0.62f)},
+            {1.0f, D2D1::ColorF(0.05f, 0.065f, 0.11f, 0.62f)}};
+        if (SUCCEEDED(ctx->CreateGradientStopCollection(gs, 2, &stops))) {
+            ComPtr<ID2D1LinearGradientBrush> bg;
+            D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp{D2D1::Point2F(0, 0),
+                                                     D2D1::Point2F(0, h)};
+            if (SUCCEEDED(ctx->CreateLinearGradientBrush(gp, stops.Get(), &bg))) {
+                D2D1_ROUNDED_RECT rr =
+                    D2D1::RoundedRect(D2D1::RectF(0, 0, w, h), kRadius, kRadius);
+                ctx->FillRoundedRectangle(rr, bg.Get());
+            }
+        }
     }
-    ComPtr<ID2D1SolidColorBrush> border;
-    if (SUCCEEDED(ctx->CreateSolidColorBrush(
-            D2D1::ColorF(1, 1, 1, 0.10f), &border))) {
-        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(0, 0, w, h),
-                                                 kRadius, kRadius);
-        ctx->DrawRoundedRectangle(rr, border.Get(), 1.0f);
+    {
+        ComPtr<ID2D1SolidColorBrush> glow, neon;
+        ctx->CreateSolidColorBrush(
+            D2D1::ColorF(accentC.r, accentC.g, accentC.b, 0.14f), &glow);
+        ctx->CreateSolidColorBrush(
+            D2D1::ColorF(accentC.r, accentC.g, accentC.b, 0.60f), &neon);
+        D2D1_ROUNDED_RECT rr =
+            D2D1::RoundedRect(D2D1::RectF(0, 0, w, h), kRadius, kRadius);
+        if (glow) ctx->DrawRoundedRectangle(rr, glow.Get(), 4.0f);
+        if (neon) ctx->DrawRoundedRectangle(rr, neon.Get(), 1.5f);
+        if (neon) {   // HUD 角括号（Dock 短臂）
+            const float inset = 4.0f, arm = 8.0f;
+            struct C { float x, y, dx, dy; };
+            const C cs[4] = {{inset, inset, 1, 1}, {w - inset, inset, -1, 1},
+                             {inset, h - inset, 1, -1}, {w - inset, h - inset, -1, -1}};
+            for (const auto& c : cs) {
+                ctx->DrawLine(D2D1::Point2F(c.x, c.y),
+                              D2D1::Point2F(c.x + c.dx * arm, c.y), neon.Get(), 2.0f);
+                ctx->DrawLine(D2D1::Point2F(c.x, c.y),
+                              D2D1::Point2F(c.x, c.y + c.dy * arm), neon.Get(), 2.0f);
+            }
+        }
     }
 
     // ---- 图标序列（悬停放大上浮 + 名称气泡；拖拽中半透明）----

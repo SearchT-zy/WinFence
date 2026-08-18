@@ -141,6 +141,13 @@ void App::HandleAction(AppAction action, FenceId subject)
         if (windows_.empty()) PostQuitMessage(0);   // 最后一个栅栏关闭才退出
         break;
 
+    case AppAction::Settings:
+        SettingsDialog::ShowSingle(instance_, ws_, icons_, store_, [this]() {
+            RefreshAllFences();
+            SyncDockVisibility();
+        });
+        break;
+
     case AppAction::Exit:
         PostQuitMessage(0);
         break;
