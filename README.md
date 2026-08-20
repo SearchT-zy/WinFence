@@ -12,9 +12,9 @@
 
 开源的 Windows 10/11 桌面图标栅栏（Fences）+ macOS 式 Dock 栏——把桌面图标分组收纳进可拖拽、可缩放、可折叠的亚克力毛玻璃圆角容器（Apple 质感：柔和投影 + 发丝描边 + 玻璃高光），或在屏幕底部 Dock 中抛物线放大、单击启动。**不移动你的任何真实文件**。
 
-![release](https://img.shields.io/badge/release-v0.1.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![c++](https://img.shields.io/badge/C%2B%2B-Win32%20%2F%20D2D%20%2F%20DComp-orange)
+![release](https://img.shields.io/badge/release-v0.1.1-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![c++](https://img.shields.io/badge/C%2B%2B-Win32%20%2F%20D2D%20%2F%20DComp-orange)
 
-**[⬇ 下载 v0.1.0](https://github.com/SearchT-zy/WinFence/releases/latest)**（绿色版 zip，解压即用，无依赖）
+**[⬇ 下载 v0.1.1](https://github.com/SearchT-zy/WinFence/releases/latest)**（绿色版 zip，解压即用，无依赖）
 
 ## 功能特性
 
