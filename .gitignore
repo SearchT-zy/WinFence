@@ -4,6 +4,10 @@ build-*/
 out/
 cmake-build-*/
 
+# 发布打包产物（本地生成，上传到 GitHub Release 即可）
+*.zip
+dist/
+
 # Visual Studio
 .vs/
 *.vcxproj
