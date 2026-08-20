@@ -1,8 +1,10 @@
-// Dock 栏（M6）：屏幕底部居中的黑色半透明圆角条（macOS 式）。
-// 悬停图标放大 + 名称气泡；单击启动；支持拖入（OLE/内部）、拖出至栅栏、栏内排序。
+// Dock 栏（M6 + M10）：屏幕底部居中圆角条（macOS 式）。
+// M10 Apple 质感：柔和投影 / 发丝描边 / 抛物线悬停放大（邻图标联动）/
+// squircle 圆角图标遮罩 + 玻璃反光 / 倒影 / 描边名称气泡。
 // 常驻顶层（WS_EX_TOPMOST）——Dock 的预期行为，与栅栏（桌面层）不同。
 #pragma once
 #include "core/Model.h"
+#include "ui/Material.h"
 
 #include <windows.h>
 #include <oleidl.h>   // IDropTarget
@@ -42,6 +44,10 @@ private:
     UINT dpi_ = 96;
 
     int hoverIndex_ = -1;           // 悬停放大项
+    int bubbleIndex_ = -1;          // 气泡显示项（动画回退期仍显示）
+    float hoverT_ = 0.0f;           // 气泡/光晕动画插值 0..1
+    float mouseXDip_ = -1.0e9f;     // 鼠标 X（面板 DIP 坐标；-1e9 = 离开）→ 抛物线放大
+    bool animating_ = false;
     bool mouseTracking_ = false;
 
     // 拖拽手势（与栅栏同方案：鼠标捕获 + FenceDrag 共享状态）
@@ -51,6 +57,8 @@ private:
     std::vector<IconUid> orderBackup_;
 
     IDropTarget* drop_ = nullptr;
+
+    SoftShadow shadow_;             // 投影缓存（按条尺寸/圆角）
 };
 
 } // namespace winfence

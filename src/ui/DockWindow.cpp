@@ -27,13 +27,21 @@ constexpr wchar_t kDockClass[] = L"WinFenceDockWnd";
 constexpr float kMargin   = 10.0f;   // 条内边距
 constexpr float kCell     = 60.0f;   // 单元宽
 constexpr float kIconBase = 44.0f;   // 常态图标
-constexpr float kIconHov  = 58.0f;   // 悬停放大
-constexpr float kBarH     = 64.0f;   // 条高
-constexpr float kRadius   = 16.0f;
+constexpr float kBarH     = 76.0f;   // 条高（留出倒影区）
+constexpr float kRadius   = 18.0f;
+constexpr float kBubbleH  = 34.0f;   // 条上方气泡区（窗口加高，命中测试穿透）
+constexpr float kReflGap  = 3.0f;    // 图标底 → 倒影顶
+constexpr float kReflH    = 16.0f;   // 倒影高度
+constexpr float kBottomPad = 8.0f;   // 倒影底 → 条底
+constexpr float kPadX     = kShadowPadDip;    // M10：左右投影留白
+constexpr float kPadBottom = 24.0f;  // M10：条下投影留白
+constexpr float kBarTop() { return kBubbleH; }          // 条顶在窗口内的 y
+constexpr float kBarLeft() { return kPadX; }            // 条左在窗口内的 x
 
 constexpr UINT kMenuOpen   = 400;
 constexpr UINT kMenuRemove = 401;
 constexpr UINT kMenuHide   = 402;
+constexpr UINT kTimerAnim  = 5;
 
 } // namespace
 
@@ -119,8 +127,10 @@ void DockWindow::Relayout()
     const size_t n = std::max<size_t>(1, ws_->dock.items.size());
     const int cellPx   = MonitorUtil::DipToPx(kCell, dpi_);
     const int marginPx = MonitorUtil::DipToPx(kMargin, dpi_);
-    const int wPx = (int)n * cellPx + 2 * marginPx;
-    const int hPx = MonitorUtil::DipToPx(kBarH, dpi_);
+    const int padXPx   = MonitorUtil::DipToPx(kPadX, dpi_);
+    const int barWPx   = (int)n * cellPx + 2 * marginPx;
+    const int wPx = barWPx + 2 * padXPx;   // M10：窗口含左右投影留白
+    const int hPx = MonitorUtil::DipToPx(kBubbleH + kBarH + kPadBottom, dpi_);
 
     const auto mon = MonitorUtil::Primary();
     const int x = mon.workArea.left + (mon.workArea.right - mon.workArea.left - wPx) / 2;
@@ -146,71 +156,57 @@ void DockWindow::Draw()
     if (!ctx) return;
 
     using Microsoft::WRL::ComPtr;
-    const FLOAT kDip = 96.0f / (FLOAT)dpi_;
     RECT rc{};
     GetClientRect(hwnd_, &rc);
-    const FLOAT w = (FLOAT)(rc.right - rc.left) * kDip;
-    const FLOAT h = (FLOAT)(rc.bottom - rc.top) * kDip;
+    const FLOAT w = (FLOAT)(rc.right - rc.left) * (96.0f / (FLOAT)dpi_);
     const IconUid dragUid = FenceDrag::Get().active ? FenceDrag::Get().uid : 0;
 
     ctx->Clear(D2D1::ColorF(0, 0, 0, 0));
 
-    // ---- 科技风：深蓝黑渐变底 + 霓虹描边 + 外发光 + HUD 括号（与栅栏同语言）----
+    // ---- M10：条区几何（窗口含左右投影留白 + 上方气泡区 + 下方投影留白）----
     const D2D1_COLOR_F accentC = D2D1::ColorF(ws_->defaultStyle.accent.r,
                                               ws_->defaultStyle.accent.g,
                                               ws_->defaultStyle.accent.b, 1.0f);
+    const FLOAT barLeft = kBarLeft();
+    const FLOAT barTop = kBarTop(), barBottom = kBarTop() + kBarH;
+    const FLOAT barW = w - 2 * kPadX;
+    const D2D1_RECT_F bar{barLeft, barTop, barLeft + barW, barBottom};
+
+    // 柔和投影（M10）
+    shadow_.Draw(ctx, bar, kRadius);
+
+    // 磨砂渐变底
     {
         ComPtr<ID2D1GradientStopCollection> stops;
-        D2D1_GRADIENT_STOP gs[2] = {
-            {0.0f, D2D1::ColorF(0.13f, 0.16f, 0.23f, 0.62f)},
-            {1.0f, D2D1::ColorF(0.05f, 0.065f, 0.11f, 0.62f)}};
-        if (SUCCEEDED(ctx->CreateGradientStopCollection(gs, 2, &stops))) {
+        D2D1_GRADIENT_STOP gs[3] = {
+            {0.0f, D2D1::ColorF(0.15f, 0.18f, 0.26f, 0.66f)},
+            {0.55f, D2D1::ColorF(0.09f, 0.11f, 0.16f, 0.64f)},
+            {1.0f, D2D1::ColorF(0.04f, 0.05f, 0.09f, 0.62f)}};
+        if (SUCCEEDED(ctx->CreateGradientStopCollection(gs, 3, &stops))) {
             ComPtr<ID2D1LinearGradientBrush> bg;
-            D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp{D2D1::Point2F(0, 0),
-                                                     D2D1::Point2F(0, h)};
+            D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp{D2D1::Point2F(0, barTop),
+                                                     D2D1::Point2F(0, barBottom)};
             if (SUCCEEDED(ctx->CreateLinearGradientBrush(gp, stops.Get(), &bg))) {
                 D2D1_ROUNDED_RECT rr =
-                    D2D1::RoundedRect(D2D1::RectF(0, 0, w, h), kRadius, kRadius);
+                    D2D1::RoundedRect(bar, kRadius, kRadius);
                 ctx->FillRoundedRectangle(rr, bg.Get());
             }
         }
     }
-    {
-        ComPtr<ID2D1SolidColorBrush> glow, neon;
-        ctx->CreateSolidColorBrush(
-            D2D1::ColorF(accentC.r, accentC.g, accentC.b, 0.14f), &glow);
-        ctx->CreateSolidColorBrush(
-            D2D1::ColorF(accentC.r, accentC.g, accentC.b, 0.60f), &neon);
-        D2D1_ROUNDED_RECT rr =
-            D2D1::RoundedRect(D2D1::RectF(0, 0, w, h), kRadius, kRadius);
-        if (glow) ctx->DrawRoundedRectangle(rr, glow.Get(), 4.0f);
-        if (neon) ctx->DrawRoundedRectangle(rr, neon.Get(), 1.5f);
-        if (neon) {   // HUD 角括号（Dock 短臂）
-            const float inset = 4.0f, arm = 8.0f;
-            struct C { float x, y, dx, dy; };
-            const C cs[4] = {{inset, inset, 1, 1}, {w - inset, inset, -1, 1},
-                             {inset, h - inset, 1, -1}, {w - inset, h - inset, -1, -1}};
-            for (const auto& c : cs) {
-                ctx->DrawLine(D2D1::Point2F(c.x, c.y),
-                              D2D1::Point2F(c.x + c.dx * arm, c.y), neon.Get(), 2.0f);
-                ctx->DrawLine(D2D1::Point2F(c.x, c.y),
-                              D2D1::Point2F(c.x, c.y + c.dy * arm), neon.Get(), 2.0f);
-            }
-        }
-    }
+    // 顶部内光晕（玻璃接光感）
+    DrawTopGlow(ctx, bar, kRadius, 0.7f);
+    // Apple 式描边（发丝白边 + 顶部内高光）
+    DrawPanelBorder(ctx, bar, kRadius, accentC.r, accentC.g, accentC.b, false);
+    // ---- 图标序列（M10：抛物线放大 + squircle 遮罩 + 玻璃反光 + 倒影）----
+    const float t = hoverT_;                     // 气泡/光晕动画插值 0..1
+    const int hoverItem = (hoverIndex_ >= 0) ? hoverIndex_ : bubbleIndex_;
+    const bool mouseInside = mouseXDip_ > -1.0e8f;
+    const float iconBaseBottom = barBottom - kBottomPad - kReflH - kReflGap;
 
-    // ---- 图标序列（悬停放大上浮 + 名称气泡；拖拽中半透明）----
-    // 可视索引（跳过 orphan/缺失）与 hoverIndex_（items 索引）换算
-    auto VisualIndexOf = [&](size_t itemIdx) -> int {
-        int vi = -1;
-        int seen = 0;
-        for (size_t i = 0; i < ws_->dock.items.size(); ++i) {
-            auto it = icons_->find(ws_->dock.items[i]);
-            if (it == icons_->end() || it->second.orphan) continue;
-            if (i == itemIdx) return seen;
-            ++seen;
-        }
-        return vi;
+    auto CenterCrop = [](const D2D1_SIZE_F& s) -> D2D1_RECT_F {
+        const float side = std::min(s.width, s.height);
+        return D2D1::RectF((s.width - side) / 2, (s.height - side) / 2,
+                           (s.width + side) / 2, (s.height + side) / 2);
     };
 
     int vi = 0;
@@ -218,31 +214,132 @@ void DockWindow::Draw()
         auto it = icons_->find(ws_->dock.items[i]);
         if (it == icons_->end() || it->second.orphan) continue;
         const IconMeta& m = it->second;
-        const float cx = kMargin + vi * kCell + kCell / 2;
-        const bool hovered = ((int)i == hoverIndex_);
-        const float size = hovered ? kIconHov : kIconBase;
-        const float top  = hovered ? (h - size - 6) : (h - size - 10);
+        const float cx = kMargin + vi * kCell + kCell / 2;   // 条本地 x
+        const float cxWin = barLeft + cx;                    // 窗口 x
+        const bool isHover = ((int)i == hoverItem);
+
+        // macOS 式抛物线放大：与鼠标距离成高斯衰减，邻图标联动
+        float mag = 1.0f;
+        if (mouseInside) {
+            const float dx = cx - mouseXDip_;
+            mag = 1.0f + 0.45f * expf(-(dx * dx) / (2.0f * 44.0f * 44.0f));
+        }
+        const float size = kIconBase * mag;
+        const float lift = (mag - 1.0f) * 16.0f;
+        const float iconBottom = iconBaseBottom - lift;
+        const float top = iconBottom - size;
+        const D2D1_RECT_F iconRect{cxWin - size / 2, top, cxWin + size / 2, iconBottom};
+        const float cr = size * 0.22f;   // squircle 圆角
         const FLOAT alpha = (m.uid == dragUid) ? 0.35f : 1.0f;
 
         if (ID2D1Bitmap* bmp = cache_->GetOrCreate(ctx, m.sourcePath, m.fileTime)) {
             const D2D1_SIZE_F s = bmp->GetSize();
             if (s.width > 0 && s.height > 0) {
-                const float sc = std::min(size / s.width, size / s.height);
-                const float iw = s.width * sc, ih = s.height * sc;
-                D2D1_RECT_F dest{cx - iw / 2, top, cx + iw / 2, top + ih};
-                ctx->DrawBitmap(bmp, &dest, alpha,
+                const D2D1_RECT_F src = CenterCrop(s);   // 中心裁剪成方形
+
+                // 悬停光晕（随气泡动画淡入）
+                if (isHover && t > 0.02f) {
+                    ComPtr<ID2D1GradientStopCollection> stops;
+                    D2D1_GRADIENT_STOP gs[2] = {
+                        {0.0f, D2D1::ColorF(accentC.r, accentC.g, accentC.b,
+                                            0.28f * t)},
+                        {1.0f, D2D1::ColorF(accentC.r, accentC.g, accentC.b, 0.0f)}};
+                    if (SUCCEEDED(ctx->CreateGradientStopCollection(gs, 2, &stops))) {
+                        ComPtr<ID2D1RadialGradientBrush> glow;
+                        D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES rp{
+                            D2D1::Point2F(cxWin, iconBottom + 2),
+                            D2D1::Point2F(cxWin, iconBottom + 2),
+                            size * 0.60f, size * 0.20f};
+                        if (SUCCEEDED(ctx->CreateRadialGradientBrush(
+                                rp, stops.Get(), &glow))) {
+                            ctx->FillEllipse(
+                                D2D1::Ellipse(D2D1::Point2F(cxWin, iconBottom + 2),
+                                              size * 0.60f, size * 0.20f),
+                                glow.Get());
+                        }
+                    }
+                }
+
+                // squircle 遮罩 + 图标 + 顶部玻璃反光
+                ComPtr<ID2D1RoundedRectangleGeometry> geo;
+                ID2D1Factory* fac = nullptr;
+                ctx->GetFactory(&fac);
+                if (fac && SUCCEEDED(fac->CreateRoundedRectangleGeometry(
+                               D2D1::RoundedRect(iconRect, cr, cr), &geo))) {
+                    ctx->PushLayer(
+                        D2D1::LayerParameters(D2D1::InfiniteRect(), geo.Get(),
+                                              D2D1_ANTIALIAS_MODE_PER_PRIMITIVE),
+                        nullptr);
+                    ctx->DrawBitmap(bmp, iconRect, alpha,
+                                    D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+                                    &src, nullptr);
+                    // 玻璃反光（上半圆角渐变）
+                    ComPtr<ID2D1GradientStopCollection> stops;
+                    D2D1_GRADIENT_STOP gs[2] = {
+                        {0.0f, D2D1::ColorF(1, 1, 1, 0.20f)},
+                        {1.0f, D2D1::ColorF(1, 1, 1, 0.0f)}};
+                    if (SUCCEEDED(ctx->CreateGradientStopCollection(
+                            gs, 2, &stops))) {
+                        ComPtr<ID2D1LinearGradientBrush> shine;
+                        D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp{
+                            D2D1::Point2F(0, top),
+                            D2D1::Point2F(0, top + size * 0.5f)};
+                        if (SUCCEEDED(ctx->CreateLinearGradientBrush(
+                                gp, stops.Get(), &shine)))
+                            ctx->FillRectangle(
+                                D2D1::RectF(cxWin - size / 2, top,
+                                            cxWin + size / 2, top + size * 0.5f),
+                                shine.Get());
+                    }
+                    ctx->PopLayer();
+                    // squircle 描边
+                    ComPtr<ID2D1SolidColorBrush> edge;
+                    ctx->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.14f), &edge);
+                    ctx->DrawRoundedRectangle(
+                        D2D1::RoundedRect(iconRect, cr, cr), edge.Get(), 1.0f);
+                }
+
+                // 倒影：中心裁剪方形镜像 + 渐变遮罩沉入条底（随放大增强）
+                const float reflH = kReflH * (0.7f + 0.5f * mag);
+                const float reflTop = iconBaseBottom + kReflGap;
+                const float midY = reflTop + reflH / 2;
+                D2D1_RECT_F reflDest{cxWin - reflH / 2, reflTop,
+                                     cxWin + reflH / 2, reflTop + reflH};
+                ctx->SetTransform(D2D1::Matrix3x2F::Scale(1.0f, -1.0f,
+                    D2D1::Point2F(cxWin, midY)));
+                ctx->DrawBitmap(bmp, &reflDest, alpha * 0.30f,
                                 D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
-                                nullptr, nullptr);
+                                &src, nullptr);
+                ctx->SetTransform(D2D1::Matrix3x2F::Identity());
+                {
+                    ComPtr<ID2D1GradientStopCollection> stops;
+                    D2D1_GRADIENT_STOP gs[2] = {
+                        {0.0f, D2D1::ColorF(0.05f, 0.065f, 0.11f, 0.0f)},
+                        {1.0f, D2D1::ColorF(0.05f, 0.065f, 0.11f, 0.66f)}};
+                    if (SUCCEEDED(ctx->CreateGradientStopCollection(gs, 2, &stops))) {
+                        ComPtr<ID2D1LinearGradientBrush> mask;
+                        D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp{
+                            D2D1::Point2F(0, reflTop), D2D1::Point2F(0, reflTop + reflH)};
+                        if (SUCCEEDED(ctx->CreateLinearGradientBrush(
+                                gp, stops.Get(), &mask)))
+                            ctx->FillRectangle(
+                                D2D1::RectF(cxWin - reflH / 2 - 2, reflTop,
+                                            cxWin + reflH / 2 + 2, reflTop + reflH),
+                                mask.Get());
+                    }
+                }
             }
         }
-        // 名称气泡（悬停时，显示在条上方）
-        if (hovered) {
-            ComPtr<ID2D1SolidColorBrush> chip, text;
+        // 名称气泡（悬停时，条上方；发丝描边 + 尾角，随动画淡入/淡出）
+        if (isHover && t > 0.02f) {
+            ComPtr<ID2D1SolidColorBrush> chip, text, line;
             ComPtr<IDWriteTextFormat> fmt;
             if (SUCCEEDED(ctx->CreateSolidColorBrush(
-                    D2D1::ColorF(0.05f, 0.05f, 0.07f, 0.85f), &chip)) &&
+                    D2D1::ColorF(0.04f, 0.045f, 0.07f, 0.90f * t), &chip)) &&
                 SUCCEEDED(ctx->CreateSolidColorBrush(
-                    D2D1::ColorF(1, 1, 1, 0.95f), &text)) &&
+                    D2D1::ColorF(1, 1, 1, 0.95f * t), &text)) &&
+                SUCCEEDED(ctx->CreateSolidColorBrush(
+                    D2D1::ColorF(1, 1, 1, 0.12f * t), &line)) &&
                 SUCCEEDED(Compositor::Get().DWrite()->CreateTextFormat(
                     L"Microsoft YaHei UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
@@ -250,11 +347,18 @@ void DockWindow::Draw()
                 fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 D2D1_ROUNDED_RECT chipRect =
-                    D2D1::RoundedRect(D2D1::RectF(cx - 86, -34, cx + 86, -6), 6, 6);
+                    D2D1::RoundedRect(D2D1::RectF(cxWin - 86, 2, cxWin + 86, 26), 8, 8);
                 ctx->FillRoundedRectangle(chipRect, chip.Get());
+                ctx->DrawRoundedRectangle(chipRect, line.Get(), 1.0f);
+                // 尾角：气泡底部中央的小菱形，指向图标
+                ctx->SetTransform(D2D1::Matrix3x2F::Rotation(
+                    45.0f, D2D1::Point2F(cxWin, 26)));
+                ctx->FillRectangle(D2D1::RectF(cxWin - 3.4f, 26 - 3.4f,
+                                               cxWin + 3.4f, 26 + 3.4f), chip.Get());
+                ctx->SetTransform(D2D1::Matrix3x2F::Identity());
                 ctx->DrawTextW(m.displayName.c_str(),
                                (UINT32)m.displayName.size(), fmt.Get(),
-                               D2D1::RectF(cx - 84, -33, cx + 84, -7), text.Get());
+                               D2D1::RectF(cxWin - 84, 3, cxWin + 84, 25), text.Get());
             }
         }
         ++vi;
@@ -271,13 +375,11 @@ void DockWindow::Draw()
                 11.5f, L"zh-CN", &fmt))) {
             fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
             fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-            ctx->DrawTextW(L"把图标拖到这里", 7, fmt.Get(),
-                           D2D1::RectF(0, 0, w, h), hint.Get());
+            ctx->DrawTextW(L"把图标拖到这里", 7, fmt.Get(), bar, hint.Get());
         }
     }
 
     Compositor::Get().EndDraw(hwnd_);
-    (void)VisualIndexOf;
 }
 
 LRESULT CALLBACK DockWindow::WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
@@ -300,6 +402,20 @@ LRESULT DockWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
     switch (msg) {
     case WM_NCCREATE:
         break;
+
+    case WM_NCHITTEST: {   // M10：条区（含气泡区上/左右投影/下投影）之外 → 点击穿透
+        POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        ScreenToClient(hwnd_, &p);
+        RECT rc{};
+        GetClientRect(hwnd_, &rc);
+        const int padXPx   = MonitorUtil::DipToPx((int)kPadX, dpi_);
+        const int barTopPx = MonitorUtil::DipToPx((int)kBubbleH, dpi_);
+        const int barBottomPx = MonitorUtil::DipToPx((int)(kBubbleH + kBarH), dpi_);
+        if (p.x < padXPx || p.x >= rc.right - padXPx ||
+            p.y < barTopPx || p.y >= barBottomPx)
+            return HTTRANSPARENT;
+        return HTCLIENT;
+    }
 
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
@@ -336,10 +452,16 @@ LRESULT DockWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
         POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         const int cellPx   = MonitorUtil::DipToPx(kCell, dpi_);
         const int marginPx = MonitorUtil::DipToPx(kMargin, dpi_);
-        const int idx = (pt.x - marginPx) / cellPx;
+        const int padXPx   = MonitorUtil::DipToPx(kPadX, dpi_);
+        const int bx = pt.x - padXPx;   // M10：条本地坐标
+        const int idx = (bx - marginPx) / cellPx;
+        const float barTopPx = (float)MonitorUtil::DipToPx((int)kBubbleH, dpi_);
+        const float barHPx = (float)MonitorUtil::DipToPx((int)kBarH, dpi_);
+        const bool inBar = pt.y >= barTopPx && pt.y < barTopPx + barHPx;
 
         if (dragging_) {   // 栏内活体排序
-            if (idx >= 0 && idx < (int)ws_->dock.items.size() && idx != pressIndex_) {
+            if (inBar && idx >= 0 && idx < (int)ws_->dock.items.size() &&
+                idx != pressIndex_) {
                 auto& items = ws_->dock.items;
                 const IconUid uid = FenceDrag::Get().uid;
                 auto it = std::find(items.begin(), items.end(), uid);
@@ -377,32 +499,64 @@ LRESULT DockWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         }
 
-        // 悬停放大
+        // 抛物线放大：记录鼠标条本地 X（离开置 -1e9）
+        mouseXDip_ = bx * (96.0f / (FLOAT)dpi_);
         if (!mouseTracking_) {
             TRACKMOUSEEVENT tme{sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd_, 0};
             if (TrackMouseEvent(&tme)) mouseTracking_ = true;
         }
-        const int newHover = (idx >= 0 && idx < (int)ws_->dock.items.size()) ? idx : -1;
+        const int newHover = (inBar && idx >= 0 && idx < (int)ws_->dock.items.size())
+                                 ? idx : -1;
         if (newHover != hoverIndex_) {
             hoverIndex_ = newHover;
-            RequestRender();
+            if (newHover >= 0) bubbleIndex_ = newHover;
+            if (!animating_) {
+                animating_ = true;
+                SetTimer(hwnd_, kTimerAnim, 15, nullptr);
+            }
         }
+        RequestRender();   // 放大随鼠标连续变化，每帧重绘
         return 0;
     }
 
     case WM_MOUSELEAVE:
         mouseTracking_ = false;
+        mouseXDip_ = -1.0e9f;   // 收起放大
         if (hoverIndex_ != -1) {
-            hoverIndex_ = -1;
-            RequestRender();
+            hoverIndex_ = -1;   // bubbleIndex_ 保留 → 动画淡出后再清
+            if (!animating_) {
+                animating_ = true;
+                SetTimer(hwnd_, kTimerAnim, 15, nullptr);
+            }
         }
+        RequestRender();
         return 0;
+
+    case WM_TIMER:   // M9：悬停缩放/淡出动画（15ms 步进）
+        if (wp == kTimerAnim) {
+            const float target = (hoverIndex_ >= 0) ? 1.0f : 0.0f;
+            const float step = 0.22f;
+            if (hoverT_ < target) hoverT_ = std::min(target, hoverT_ + step);
+            else if (hoverT_ > target) hoverT_ = std::max(target, hoverT_ - step);
+            RequestRender();
+            if (hoverT_ == target) {
+                KillTimer(hwnd_, kTimerAnim);
+                animating_ = false;
+                if (hoverIndex_ < 0) bubbleIndex_ = -1;
+            }
+            return 0;
+        }
+        break;
 
     case WM_LBUTTONDOWN: {
         POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        const int barTopPx = MonitorUtil::DipToPx((int)kBubbleH, dpi_);
+        const int barBottomPx = MonitorUtil::DipToPx((int)(kBubbleH + kBarH), dpi_);
+        if (pt.y < barTopPx || pt.y >= barBottomPx) return 0;   // 条外（理论上被穿透）
         const int cellPx   = MonitorUtil::DipToPx(kCell, dpi_);
         const int marginPx = MonitorUtil::DipToPx(kMargin, dpi_);
-        const int idx = (pt.x - marginPx) / cellPx;
+        const int padXPx   = MonitorUtil::DipToPx(kPadX, dpi_);
+        const int idx = (pt.x - padXPx - marginPx) / cellPx;
         if (idx >= 0 && idx < (int)ws_->dock.items.size()) {
             pressIndex_ = idx;
             pressPt_ = pt;
@@ -462,6 +616,7 @@ LRESULT DockWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
         return 0;
 
     case WM_DESTROY:
+        KillTimer(hwnd_, kTimerAnim);
         if (drop_) { RevokeDragDrop(hwnd_); drop_ = nullptr; }
         Compositor::Get().UnbindWindow(hwnd_);
         return 0;
@@ -500,9 +655,13 @@ void DockWindow::ShowContextMenu(POINT screenPt)
 {
     POINT client = screenPt;
     ScreenToClient(hwnd_, &client);
+    const int barTopPx = MonitorUtil::DipToPx((int)kBubbleH, dpi_);
+    const int barBottomPx = MonitorUtil::DipToPx((int)(kBubbleH + kBarH), dpi_);
     const int cellPx   = MonitorUtil::DipToPx(kCell, dpi_);
     const int marginPx = MonitorUtil::DipToPx(kMargin, dpi_);
-    const int idx = (client.x - marginPx) / cellPx;
+    const int padXPx   = MonitorUtil::DipToPx(kPadX, dpi_);
+    const int idx = (client.y >= barTopPx && client.y < barBottomPx)
+                        ? (client.x - padXPx - marginPx) / cellPx : -1;
     IconUid uid = 0;
     if (idx >= 0 && idx < (int)ws_->dock.items.size())
         uid = ws_->dock.items[(size_t)idx];

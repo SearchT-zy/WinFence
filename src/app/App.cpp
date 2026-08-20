@@ -119,6 +119,7 @@ void App::HandleAction(AppAction action, FenceId subject)
             SpawnFenceWindow(*nf);
         }
         DesktopAnchor::AnchorAll();
+        for (auto& w : windows_) w->SyncShadow();   // M10 v3：重锚后阴影窗回位
         store_.ScheduleSave();
         break;
     }
@@ -137,6 +138,7 @@ void App::HandleAction(AppAction action, FenceId subject)
             else ++i;
         }
         DesktopAnchor::AnchorAll();
+        for (auto& w : windows_) w->SyncShadow();   // M10 v3：重锚后阴影窗回位
         store_.ScheduleSave();
         if (windows_.empty()) PostQuitMessage(0);   // 最后一个栅栏关闭才退出
         break;

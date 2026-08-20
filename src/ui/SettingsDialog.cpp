@@ -1,6 +1,6 @@
-// 设置面板（M8 整窗 D2D 自绘 · 科技风）：
+// 设置面板（M8 整窗 D2D 自绘 → M10 Apple 质感）：
 // 零 Win32 子控件——胶囊分段按钮 / 发光滑条 / 开关 / 自绘输入框（含光标与 Ctrl+V），
-// 所有改动实时生效（样式/开关即时反馈，霓虹青主题与栅栏同一视觉语言）。
+// M10：窗口四周投影留白 + 柔和投影 + 发丝描边 + 磨砂噪点 + 实时预览卡 + 强调色预设。
 #include "ui/SettingsDialog.h"
 
 #include <d2d1helper.h>
@@ -15,6 +15,7 @@
 #include "platform/DesktopIcons.h"
 #include "ui/AiPreviewDialog.h"
 #include "ui/Compositor.h"
+#include "ui/Material.h"
 
 namespace winfence {
 
@@ -26,13 +27,26 @@ constexpr wchar_t kClass[] = L"WinFenceSettingsWnd";
 constexpr UINT kMsgAiDone = WM_APP + 7;
 constexpr UINT kTimerCaret = 1;
 
-constexpr float kW = 340.0f, kH = 560.0f;   // 逻辑尺寸（DIP）
+constexpr float kW = 340.0f, kH = 660.0f;   // 逻辑尺寸（DIP）
+
+// 强调色预设（M9）：霓虹青 / 电光蓝 / 霓虹紫 / 翠绿 / 琥珀 / 玫红
+struct AccentPreset { const wchar_t* name; ColorF c; };
+constexpr AccentPreset kAccents[] = {
+    {L"霓虹青", {0.243f, 0.788f, 0.961f, 1.0f}},
+    {L"电光蓝", {0.357f, 0.549f, 1.000f, 1.0f}},
+    {L"霓虹紫", {0.655f, 0.545f, 0.980f, 1.0f}},
+    {L"翠绿",   {0.204f, 0.827f, 0.600f, 1.0f}},
+    {L"琥珀",   {0.984f, 0.749f, 0.141f, 1.0f}},
+    {L"玫红",   {0.984f, 0.443f, 0.522f, 1.0f}},
+};
+constexpr int kAccentCount = (int)(sizeof(kAccents) / sizeof(kAccents[0]));
 
 // ---- 命中目标 ----
 enum CtrlId {
     idNone = 0,
     idBackdrop0, idBackdrop1, idBackdrop2,
     idOpacity, idRadius,
+    idAccent0 = 10, idAccent1, idAccent2, idAccent3, idAccent4, idAccent5,
     idDock, idHideDesk, idAutoRun,
     idProv0, idProv1,
     idModel, idKey,
@@ -40,8 +54,10 @@ enum CtrlId {
 };
 
 struct Layout {
+    D2D1_RECT_F preview;
     D2D1_RECT_F backdrop[3];
     D2D1_RECT_F sliderOp, sliderRd;
+    D2D1_RECT_F swatches[kAccentCount];
     D2D1_RECT_F togDock, togHide, togAuto;
     D2D1_RECT_F prov[2];
     D2D1_RECT_F fieldModel, fieldKey;
@@ -53,24 +69,29 @@ const Layout& L()
     static Layout ly = [] {
         Layout l{};
         const float pad = 18.0f;
+        l.preview = {pad, 46, kW - pad, 118};
         float x = pad;
         const float widths[3] = {86.0f, 82.0f, 54.0f};
         for (int i = 0; i < 3; ++i) {
-            l.backdrop[i] = {x, 72, x + widths[i], 98};
+            l.backdrop[i] = {x, 146, x + widths[i], 172};
             x += widths[i] + 8;
         }
-        l.sliderOp = {pad, 124, kW - pad, 144};
-        l.sliderRd = {pad, 164, kW - pad, 184};
-        l.togDock  = {kW - pad - 40, 212, kW - pad, 234};
-        l.togHide  = {kW - pad - 40, 242, kW - pad, 264};
-        l.togAuto  = {kW - pad - 40, 272, kW - pad, 294};
-        l.prov[0] = {pad, 324, pad + 118, 350};
-        l.prov[1] = {pad + 126, 324, pad + 126 + 118, 350};
-        l.fieldModel = {pad, 374, kW - pad, 400};
-        l.fieldKey   = {pad, 422, kW - pad, 448};
-        l.btnAiRun   = {pad, 458, pad + 90, 488};
-        l.btnAiReset = {pad + 98, 458, pad + 98 + 104, 488};
-        l.btnApply   = {kW - pad - 120, 514, kW - pad, 548};
+        l.sliderOp = {pad, 192, kW - pad, 212};
+        l.sliderRd = {pad, 230, kW - pad, 250};
+        for (int i = 0; i < kAccentCount; ++i) {   // 色板圆心 x = 40 + i*30
+            const float cx = 40.0f + i * 30.0f;
+            l.swatches[i] = {cx - 12, 272, cx + 12, 296};
+        }
+        l.togDock  = {kW - pad - 40, 326, kW - pad, 348};
+        l.togHide  = {kW - pad - 40, 356, kW - pad, 378};
+        l.togAuto  = {kW - pad - 40, 386, kW - pad, 408};
+        l.prov[0] = {pad, 438, pad + 118, 464};
+        l.prov[1] = {pad + 126, 438, pad + 126 + 118, 464};
+        l.fieldModel = {pad, 482, kW - pad, 508};
+        l.fieldKey   = {pad, 526, kW - pad, 552};
+        l.btnAiRun   = {pad, 560, pad + 90, 590};
+        l.btnAiReset = {pad + 98, 560, pad + 98 + 104, 590};
+        l.btnApply   = {kW - pad - 120, 618, kW - pad, 652};
         l.btnClose   = {kW - 34, 12, kW - 14, 32};
         return l;
     }();
@@ -88,6 +109,8 @@ CtrlId HitTest(float x, float y)
     for (int i = 0; i < 3; ++i) if (InRect(l.backdrop[i], x, y)) return (CtrlId)(idBackdrop0 + i);
     if (InRect(l.sliderOp, x, y)) return idOpacity;
     if (InRect(l.sliderRd, x, y)) return idRadius;
+    for (int i = 0; i < kAccentCount; ++i)
+        if (InRect(l.swatches[i], x, y)) return (CtrlId)(idAccent0 + i);
     if (InRect(l.togDock, x, y))  return idDock;
     if (InRect(l.togHide, x, y))  return idHideDesk;
     if (InRect(l.togAuto, x, y))  return idAutoRun;
@@ -147,6 +170,7 @@ struct PanelState {
     int backdropSel = 0;
     int opacity = 65;          // 20..100
     int radius = 10;           // 0..24
+    int accentSel = 0;         // kAccents 索引
     int aiProvSel = 0;
     std::wstring modelBuf, keyBuf;
     std::wstring status;
@@ -158,8 +182,12 @@ struct PanelState {
 };
 PanelState g;
 
-float DipX(LONG px) { return px * 96.0f / (float)g.dpi; }
-float DipY(LONG py) { return py * 96.0f / (float)g.dpi; }
+constexpr float kPad = kShadowPadDip;   // M10：投影留白（内容原点偏移）
+constexpr float kWinW = kW + 2 * kPad, kWinH = kH + 2 * kPad;   // 实际窗口尺寸
+
+// 窗口客户区像素 → 内容坐标（DIP，已扣投影留白）
+float DipX(LONG px) { return px * 96.0f / (float)g.dpi - kPad; }
+float DipY(LONG py) { return py * 96.0f / (float)g.dpi - kPad; }
 
 // ---- 实时生效：样式改动刷到所有栅栏 ----
 void LiveStyleApply()
@@ -235,6 +263,12 @@ void OnClick(CtrlId id)
         g.ws->defaultStyle.backdrop = (BackdropType)g.backdropSel;
         LiveStyleApply();
         break;
+    case idAccent0: case idAccent1: case idAccent2:
+    case idAccent3: case idAccent4: case idAccent5:   // M9：强调色预设即时全局换色
+        g.accentSel = id - idAccent0;
+        g.ws->defaultStyle.accent = kAccents[g.accentSel].c;
+        LiveStyleApply();
+        break;
     case idDock:
         g.ws->dock.visible = !g.ws->dock.visible;
         if (g.onApplied) g.onApplied();
@@ -292,19 +326,33 @@ float TextW(const std::wstring& s, IDWriteTextFormat* f)
 void Pill(ID2D1DeviceContext* c, const D2D1_RECT_F& r, const wchar_t* text,
           bool selected, bool hovered, ID2D1SolidColorBrush* accent)
 {
-    ComPtr<ID2D1SolidColorBrush> fill, txt, ln;
-    c->CreateSolidColorBrush(
-        selected ? D2D1::ColorF(accent->GetColor().r, accent->GetColor().g,
-                                accent->GetColor().b, 0.85f)
-                 : D2D1::ColorF(1, 1, 1, hovered ? 0.10f : 0.05f),
-        &fill);
-    c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, selected ? 1.0f : 0.75f), &txt);
-    c->CreateSolidColorBrush(
-        D2D1::ColorF(accent->GetColor().r, accent->GetColor().g,
-                     accent->GetColor().b, selected ? 0.9f : 0.30f), &ln);
+    ComPtr<ID2D1SolidColorBrush> fill, txt, ln, hi;
+    const auto& a = accent->GetColor();
     const float h = r.bottom - r.top;
     D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, h / 2, h / 2);
-    c->FillRoundedRectangle(rr, fill.Get());
+    if (selected) {   // M10：纵向 accent 渐变（上亮下暗）+ 顶部内高光
+        ComPtr<ID2D1GradientStopCollection> stops;
+        D2D1_GRADIENT_STOP gs[2] = {
+            {0.0f, D2D1::ColorF(a.r, a.g, a.b, 0.95f)},
+            {1.0f, D2D1::ColorF(a.r, a.g, a.b, 0.72f)}};
+        if (SUCCEEDED(c->CreateGradientStopCollection(gs, 2, &stops))) {
+            ComPtr<ID2D1LinearGradientBrush> bg;
+            D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp{D2D1::Point2F(0, r.top),
+                                                     D2D1::Point2F(0, r.bottom)};
+            if (SUCCEEDED(c->CreateLinearGradientBrush(gp, stops.Get(), &bg)))
+                c->FillRoundedRectangle(rr, bg.Get());
+        }
+        c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.35f), &hi);
+        c->DrawLine(D2D1::Point2F(r.left + h / 2, r.top + 1.5f),
+                    D2D1::Point2F(r.right - h / 2, r.top + 1.5f), hi.Get(), 1.0f);
+    } else {
+        c->CreateSolidColorBrush(
+            D2D1::ColorF(1, 1, 1, hovered ? 0.10f : 0.05f), &fill);
+        c->FillRoundedRectangle(rr, fill.Get());
+    }
+    c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, selected ? 1.0f : 0.75f), &txt);
+    c->CreateSolidColorBrush(
+        D2D1::ColorF(a.r, a.g, a.b, selected ? 0.9f : 0.30f), &ln);
     c->DrawRoundedRectangle(rr, ln.Get(), 1.0f);
     if (auto f = Fmt(12.5f, DWRITE_FONT_WEIGHT_NORMAL)) {
         f->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
@@ -313,10 +361,10 @@ void Pill(ID2D1DeviceContext* c, const D2D1_RECT_F& r, const wchar_t* text,
     }
 }
 
-void Toggle(ID2D1DeviceContext* c, const D2D1_RECT_F& r, bool on,
+void Toggle(ID2D1DeviceContext* c, const D2D1_RECT_F& r, bool on, bool hovered,
             ID2D1SolidColorBrush* accent)
 {
-    ComPtr<ID2D1SolidColorBrush> track, knob;
+    ComPtr<ID2D1SolidColorBrush> track, knob, halo;
     c->CreateSolidColorBrush(
         on ? D2D1::ColorF(accent->GetColor().r, accent->GetColor().g,
                           accent->GetColor().b, 0.9f)
@@ -324,28 +372,64 @@ void Toggle(ID2D1DeviceContext* c, const D2D1_RECT_F& r, bool on,
     c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.95f), &knob);
     const float h = r.bottom - r.top;
     D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, h / 2, h / 2);
+    if (hovered) {   // M9：悬停外发光环
+        c->CreateSolidColorBrush(
+            D2D1::ColorF(accent->GetColor().r, accent->GetColor().g,
+                         accent->GetColor().b, 0.30f), &halo);
+        D2D1_ROUNDED_RECT hl = D2D1::RoundedRect(
+            D2D1::RectF(r.left - 2, r.top - 2, r.right + 2, r.bottom + 2),
+            h / 2 + 2, h / 2 + 2);
+        c->DrawRoundedRectangle(hl, halo.Get(), 2.5f);
+    }
     c->FillRoundedRectangle(rr, track.Get());
+    // 轨道内阴影（顶部 1px 深色，凹陷感）
+    {
+        ComPtr<ID2D1SolidColorBrush> inset;
+        c->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 0.25f), &inset);
+        c->DrawLine(D2D1::Point2F(r.left + h / 2, r.top + 1),
+                    D2D1::Point2F(r.right - h / 2, r.top + 1), inset.Get(), 1.0f);
+    }
     const float d = h - 6;
     const float kx = on ? r.right - d - 3 : r.left + 3;
+    // 旋钮投影（M10：轻浮起感）
+    {
+        ComPtr<ID2D1SolidColorBrush> ksh;
+        c->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 0.30f), &ksh);
+        c->FillEllipse(D2D1::Ellipse(D2D1::Point2F(kx + d / 2, r.top + h / 2 + 1.5f),
+                                     d / 2 + 1, d / 2 + 1), ksh.Get());
+    }
     c->FillEllipse(D2D1::Ellipse(D2D1::Point2F(kx + d / 2, r.top + h / 2),
                                  d / 2, d / 2), knob.Get());
+    // 旋钮顶部高光
+    {
+        ComPtr<ID2D1SolidColorBrush> hi;
+        c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.35f), &hi);
+        c->DrawLine(D2D1::Point2F(kx + d / 2 - d / 4, r.top + h / 2 - d / 3),
+                    D2D1::Point2F(kx + d / 2 + d / 4, r.top + h / 2 - d / 3),
+                    hi.Get(), 1.0f);
+    }
 }
 
 void Slider(ID2D1DeviceContext* c, const D2D1_RECT_F& r, float t,
             ID2D1SolidColorBrush* accent)
 {
     const float cy = (r.top + r.bottom) / 2;
-    ComPtr<ID2D1SolidColorBrush> base, glow;
+    ComPtr<ID2D1SolidColorBrush> base, glow, shade;
     c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.10f), &base);
+    c->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 0.22f), &shade);
     c->CreateSolidColorBrush(
         D2D1::ColorF(accent->GetColor().r, accent->GetColor().g,
                      accent->GetColor().b, 0.9f), &glow);
     D2D1_RECT_F track{r.left, cy - 2, r.right, cy + 2};
     c->FillRoundedRectangle(D2D1::RoundedRect(track, 2, 2), base.Get());
+    c->DrawLine(D2D1::Point2F(r.left + 2, cy + 1.5f),
+                D2D1::Point2F(r.right - 2, cy + 1.5f), shade.Get(), 1.0f);   // 轨道内阴影
     const float x = r.left + (r.right - r.left) * t;
     D2D1_RECT_F fill{r.left, cy - 2, x, cy + 2};
     if (x > r.left) c->FillRoundedRectangle(D2D1::RoundedRect(fill, 2, 2), glow.Get());
-    c->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x, cy), 8, 8), glow.Get());   // 发光滑块
+    // 滑块：投影 + accent 光环 + 白芯（M10）
+    c->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x, cy + 1.5f), 9, 9), shade.Get());
+    c->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x, cy), 8, 8), glow.Get());
     c->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x, cy), 3.5f, 3.5f),
                    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush>(
                        [&] { ComPtr<ID2D1SolidColorBrush> w;
@@ -356,15 +440,33 @@ void Slider(ID2D1DeviceContext* c, const D2D1_RECT_F& r, float t,
 void TechButton(ID2D1DeviceContext* c, const D2D1_RECT_F& r, const wchar_t* text,
                 bool filled, bool hovered, bool enabled, ID2D1SolidColorBrush* accent)
 {
-    ComPtr<ID2D1SolidColorBrush> fill, txt, ln;
+    ComPtr<ID2D1SolidColorBrush> fill, txt, ln, hi;
     const auto& a = accent->GetColor();
-    c->CreateSolidColorBrush(
-        filled ? D2D1::ColorF(a.r, a.g, a.b, enabled ? (hovered ? 1.0f : 0.85f) : 0.3f)
-               : D2D1::ColorF(1, 1, 1, hovered ? 0.12f : 0.05f), &fill);
+    D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, 6, 6);
+    if (filled) {   // M10：纵向 accent 渐变 + 顶部内高光
+        ComPtr<ID2D1GradientStopCollection> stops;
+        const float topA = enabled ? (hovered ? 1.0f : 0.92f) : 0.30f;
+        const float botA = enabled ? (hovered ? 0.86f : 0.76f) : 0.24f;
+        D2D1_GRADIENT_STOP gs[2] = {
+            {0.0f, D2D1::ColorF(a.r, a.g, a.b, topA)},
+            {1.0f, D2D1::ColorF(a.r, a.g, a.b, botA)}};
+        if (SUCCEEDED(c->CreateGradientStopCollection(gs, 2, &stops))) {
+            ComPtr<ID2D1LinearGradientBrush> bg;
+            D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp{D2D1::Point2F(0, r.top),
+                                                     D2D1::Point2F(0, r.bottom)};
+            if (SUCCEEDED(c->CreateLinearGradientBrush(gp, stops.Get(), &bg)))
+                c->FillRoundedRectangle(rr, bg.Get());
+        }
+        c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, enabled ? 0.30f : 0.12f), &hi);
+        c->DrawLine(D2D1::Point2F(r.left + 6, r.top + 1.5f),
+                    D2D1::Point2F(r.right - 6, r.top + 1.5f), hi.Get(), 1.0f);
+    } else {
+        c->CreateSolidColorBrush(
+            D2D1::ColorF(1, 1, 1, hovered ? 0.12f : 0.05f), &fill);
+        c->FillRoundedRectangle(rr, fill.Get());
+    }
     c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, enabled ? 0.95f : 0.5f), &txt);
     c->CreateSolidColorBrush(D2D1::ColorF(a.r, a.g, a.b, filled ? 1.0f : 0.45f), &ln);
-    D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, 6, 6);
-    c->FillRoundedRectangle(rr, fill.Get());
     c->DrawRoundedRectangle(rr, ln.Get(), 1.2f);
     if (auto f = Fmt(13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) {
         f->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
@@ -390,6 +492,13 @@ void Field(ID2D1DeviceContext* c, const D2D1_RECT_F& r, const std::wstring& text
     D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, 6, 6);
     c->FillRoundedRectangle(rr, bg.Get());
     c->DrawRoundedRectangle(rr, ln.Get(), 1.2f);
+    // 顶部内阴影（M10：凹陷感）
+    {
+        ComPtr<ID2D1SolidColorBrush> inset;
+        c->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 0.35f), &inset);
+        c->DrawLine(D2D1::Point2F(r.left + 6, r.top + 1),
+                    D2D1::Point2F(r.right - 6, r.top + 1), inset.Get(), 1.0f);
+    }
     const D2D1_RECT_F tr{r.left + 10, r.top, r.right - 8, r.bottom};
     if (auto f = Fmt(12.5f, DWRITE_FONT_WEIGHT_NORMAL, L"Consolas")) {
         f->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -423,6 +532,130 @@ void SectionLabel(ID2D1DeviceContext* c, float y, const wchar_t* text,
     c->FillEllipse(D2D1::Ellipse(D2D1::Point2F(20, y + 9), 3, 3), accent);
 }
 
+// ---- M9：实时预览卡（mini 栅栏 + mini Dock，样式改动即时反馈）----
+void DrawPreview(ID2D1DeviceContext* c, const D2D1_RECT_F& card)
+{
+    const FenceStyle& st = g.ws->defaultStyle;
+    ComPtr<ID2D1SolidColorBrush> cardBg, cardLn, labelTxt, chip, chipDim;
+    c->CreateSolidColorBrush(D2D1::ColorF(0.02f, 0.03f, 0.055f, 0.85f), &cardBg);
+    c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.08f), &cardLn);
+    c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.45f), &labelTxt);
+    c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.55f), &chip);
+    c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.20f), &chipDim);
+
+    D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(card, 10, 10);
+    c->FillRoundedRectangle(rr, cardBg.Get());
+    c->DrawRoundedRectangle(rr, cardLn.Get(), 1.0f);
+    if (auto f = Fmt(10.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) {
+        c->DrawTextW(L"实时预览", 4, f.Get(),
+                     D2D1::RectF(card.left + 10, card.top + 4, card.right - 10,
+                                 card.top + 18), labelTxt.Get());
+    }
+
+    // ---- mini 栅栏 ----
+    const D2D1_RECT_F fenceR{card.left + 10, card.top + 24,
+                             card.left + 138, card.bottom - 8};
+    const float fr = std::min(8.0f, st.cornerRadiusDip * 0.6f);
+    const float bodyAlpha = (st.backdrop == BackdropType::None) ? 0.06f
+                          : (st.backdrop == BackdropType::Acrylic) ? 0.50f
+                          : st.opacity * 0.85f;
+    {
+        ComPtr<ID2D1GradientStopCollection> stops;
+        D2D1_GRADIENT_STOP gs[2] = {
+            {0.0f, D2D1::ColorF(0.13f, 0.16f, 0.23f, bodyAlpha)},
+            {1.0f, D2D1::ColorF(0.05f, 0.065f, 0.11f, bodyAlpha * 0.96f)}};
+        if (SUCCEEDED(c->CreateGradientStopCollection(gs, 2, &stops))) {
+            ComPtr<ID2D1LinearGradientBrush> bg;
+            D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp{
+                D2D1::Point2F(0, fenceR.top), D2D1::Point2F(0, fenceR.bottom)};
+            if (SUCCEEDED(c->CreateLinearGradientBrush(gp, stops.Get(), &bg)))
+                c->FillRoundedRectangle(D2D1::RoundedRect(fenceR, fr, fr), bg.Get());
+        }
+    }
+    {
+        ComPtr<ID2D1SolidColorBrush> neon, hair, hi;
+        c->CreateSolidColorBrush(D2D1::ColorF(st.accent.r, st.accent.g,
+                                              st.accent.b, 0.30f), &neon);
+        c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.12f), &hair);
+        c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.16f), &hi);
+        c->DrawRoundedRectangle(D2D1::RoundedRect(fenceR, fr, fr), hair.Get(), 1.0f);
+        c->DrawRoundedRectangle(D2D1::RoundedRect(
+            D2D1::RectF(fenceR.left + 1, fenceR.top + 1, fenceR.right - 1,
+                        fenceR.bottom - 1),
+            std::max(1.0f, fr - 1), std::max(1.0f, fr - 1)), hi.Get(), 1.0f);
+        // 标题条 + 身份色点 + 3 个图标占位块
+        c->DrawLine(D2D1::Point2F(fenceR.left + 4, fenceR.top + 12),
+                    D2D1::Point2F(fenceR.right - 4, fenceR.top + 12), neon.Get(), 0.8f);
+        c->FillRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(fenceR.left + 6, fenceR.top + 5,
+                                          fenceR.left + 9, fenceR.top + 11),
+                              1.5f, 1.5f), neon.Get());
+        const float bx = fenceR.left + 14;
+        const float by = fenceR.top + 24;
+        for (int i = 0; i < 3; ++i) {
+            const float x = bx + i * 26;
+            c->FillRoundedRectangle(
+                D2D1::RoundedRect(D2D1::RectF(x, by, x + 14, by + 14), 4, 4),
+                (i == 1) ? chip.Get() : chipDim.Get());
+        }
+    }
+
+    // ---- mini Dock ----
+    const D2D1_RECT_F dockR{card.right - 134, card.top + 38,
+                            card.right - 10, card.bottom - 8};
+    {
+        ComPtr<ID2D1GradientStopCollection> stops;
+        D2D1_GRADIENT_STOP gs[2] = {
+            {0.0f, D2D1::ColorF(0.13f, 0.16f, 0.23f, 0.75f)},
+            {1.0f, D2D1::ColorF(0.05f, 0.065f, 0.11f, 0.75f)}};
+        if (SUCCEEDED(c->CreateGradientStopCollection(gs, 2, &stops))) {
+            ComPtr<ID2D1LinearGradientBrush> bg;
+            D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp{
+                D2D1::Point2F(0, dockR.top), D2D1::Point2F(0, dockR.bottom)};
+            if (SUCCEEDED(c->CreateLinearGradientBrush(gp, stops.Get(), &bg)))
+                c->FillRoundedRectangle(
+                    D2D1::RoundedRect(dockR, 10, 10), bg.Get());
+        }
+    }
+    {
+        ComPtr<ID2D1SolidColorBrush> neon, hair;
+        c->CreateSolidColorBrush(D2D1::ColorF(st.accent.r, st.accent.g,
+                                              st.accent.b, 0.30f), &neon);
+        c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.12f), &hair);
+        c->DrawRoundedRectangle(D2D1::RoundedRect(dockR, 10, 10), hair.Get(), 1.0f);
+        const float cy = (dockR.top + dockR.bottom) / 2;
+        for (int i = 0; i < 3; ++i) {
+            const float x = dockR.left + 16 + i * 20;
+            c->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x, cy - 2), 5, 5),
+                           (i == 1) ? chip.Get() : chipDim.Get());
+        }
+    }
+}
+
+// ---- M9：强调色预设色板 ----
+void DrawSwatches(ID2D1DeviceContext* c, const Layout& l)
+{
+    for (int i = 0; i < kAccentCount; ++i) {
+        const D2D1_RECT_F& r = l.swatches[i];
+        const float cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+        const float rad = (g.hover == (CtrlId)(idAccent0 + i)) ? 10.5f : 9.0f;
+        const bool sel = (g.accentSel == i);
+        ComPtr<ID2D1SolidColorBrush> dot, ring, glow;
+        c->CreateSolidColorBrush(
+            D2D1::ColorF(kAccents[i].c.r, kAccents[i].c.g, kAccents[i].c.b, 1.0f), &dot);
+        c->CreateSolidColorBrush(
+            D2D1::ColorF(kAccents[i].c.r, kAccents[i].c.g, kAccents[i].c.b, 0.25f), &glow);
+        if (sel || g.hover == (CtrlId)(idAccent0 + i))
+            c->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 15, 15), glow.Get());
+        c->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), rad, rad), dot.Get());
+        if (sel) {
+            c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.95f), &ring);
+            c->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), rad + 2.5f, rad + 2.5f),
+                           ring.Get(), 1.4f);
+        }
+    }
+}
+
 void Render()
 {
     ID2D1DeviceContext* c = Compositor::Get().BeginDraw(g.dlg);
@@ -435,12 +668,20 @@ void Render()
 
     c->Clear(D2D1::ColorF(0, 0, 0, 0));
 
+    // ---- M10：柔和投影（窗口坐标系）----
+    {
+        static SoftShadow shadow;
+        shadow.Draw(c, D2D1::RectF(kPad, kPad, kPad + kW, kPad + kH), 12);
+    }
+    // 内容全部画在平移后的内容坐标系
+    c->SetTransform(D2D1::Matrix3x2F::Translation(kPad, kPad));
+
     // ---- 背景：深蓝黑渐变（近实心，保证可读性）----
     {
         ComPtr<ID2D1GradientStopCollection> stops;
         D2D1_GRADIENT_STOP gs[2] = {
-            {0.0f, D2D1::ColorF(0.12f, 0.15f, 0.21f, 0.98f)},
-            {1.0f, D2D1::ColorF(0.045f, 0.055f, 0.095f, 0.98f)}};
+            {0.0f, D2D1::ColorF(0.12f, 0.15f, 0.21f, 0.985f)},
+            {1.0f, D2D1::ColorF(0.045f, 0.055f, 0.095f, 0.985f)}};
         if (SUCCEEDED(c->CreateGradientStopCollection(gs, 2, &stops))) {
             ComPtr<ID2D1LinearGradientBrush> bg;
             D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp{D2D1::Point2F(0, 0),
@@ -450,29 +691,12 @@ void Render()
                     D2D1::RoundedRect(D2D1::RectF(0, 0, kW, kH), 12, 12), bg.Get());
         }
     }
-    // 外发光 + 霓虹描边 + HUD 括号
-    {
-        ComPtr<ID2D1SolidColorBrush> glow, neon;
-        c->CreateSolidColorBrush(D2D1::ColorF(accent->GetColor().r,
-            accent->GetColor().g, accent->GetColor().b, 0.15f), &glow);
-        c->CreateSolidColorBrush(D2D1::ColorF(accent->GetColor().r,
-            accent->GetColor().g, accent->GetColor().b, 0.65f), &neon);
-        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(0, 0, kW, kH), 12, 12);
-        if (glow) c->DrawRoundedRectangle(rr, glow.Get(), 5.0f);
-        if (neon) c->DrawRoundedRectangle(rr, neon.Get(), 1.5f);
-        if (neon) {
-            const float inset = 5, arm = 12;
-            struct C { float x, y, dx, dy; };
-            const C cs[4] = {{inset, inset, 1, 1}, {kW - inset, inset, -1, 1},
-                             {inset, kH - inset, 1, -1}, {kW - inset, kH - inset, -1, -1}};
-            for (const auto& k : cs) {
-                c->DrawLine(D2D1::Point2F(k.x, k.y),
-                            D2D1::Point2F(k.x + k.dx * arm, k.y), neon.Get(), 2.0f);
-                c->DrawLine(D2D1::Point2F(k.x, k.y),
-                            D2D1::Point2F(k.x, k.y + k.dy * arm), neon.Get(), 2.0f);
-            }
-        }
-    }
+    // 顶部内光晕（玻璃接光感）
+    DrawTopGlow(c, D2D1::RectF(0, 0, kW, kH), 12, 0.8f);
+    // Apple 式描边（发丝白边 + 顶部内高光 + 底部内阴影）
+    DrawPanelBorder(c, D2D1::RectF(0, 0, kW, kH), 12,
+                    g.ws->defaultStyle.accent.r, g.ws->defaultStyle.accent.g,
+                    g.ws->defaultStyle.accent.b, false);
 
     ComPtr<ID2D1SolidColorBrush> txt, dim;
     c->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.92f), &txt);
@@ -495,8 +719,11 @@ void Render()
         }
     }
 
+    // ---- 实时预览卡（M9）----
+    DrawPreview(c, l.preview);
+
     // ---- 外观 ----
-    SectionLabel(c, 52, L"外观", accent.Get());
+    SectionLabel(c, 132, L"外观", accent.Get());
     Pill(c, l.backdrop[0], L"亚克力", g.backdropSel == 0, g.hover == idBackdrop0, accent.Get());
     Pill(c, l.backdrop[1], L"半透明", g.backdropSel == 1, g.hover == idBackdrop1, accent.Get());
     Pill(c, l.backdrop[2], L"无",     g.backdropSel == 2, g.hover == idBackdrop2, accent.Get());
@@ -504,38 +731,45 @@ void Render()
     if (auto f = Fmt(12.5f, DWRITE_FONT_WEIGHT_NORMAL)) {
         wchar_t v[32];
         swprintf_s(v, L"%d%%", g.opacity);
-        c->DrawTextW(L"透明度", 3, f.Get(), D2D1::RectF(30, 108, 200, 126), dim.Get());
+        c->DrawTextW(L"透明度", 3, f.Get(), D2D1::RectF(30, 178, 200, 196), dim.Get());
         c->DrawTextW(v, (UINT32)wcslen(v), Fmt(12.5f, DWRITE_FONT_WEIGHT_NORMAL, L"Consolas").Get(),
-                     D2D1::RectF(kW - 60, 108, kW - 18, 126), accent.Get());
+                     D2D1::RectF(kW - 60, 178, kW - 18, 196), accent.Get());
         swprintf_s(v, L"%d", g.radius);
-        c->DrawTextW(L"圆角", 2, f.Get(), D2D1::RectF(30, 148, 200, 166), dim.Get());
+        c->DrawTextW(L"圆角", 2, f.Get(), D2D1::RectF(30, 216, 200, 234), dim.Get());
         c->DrawTextW(v, (UINT32)wcslen(v), Fmt(12.5f, DWRITE_FONT_WEIGHT_NORMAL, L"Consolas").Get(),
-                     D2D1::RectF(kW - 60, 148, kW - 18, 166), accent.Get());
+                     D2D1::RectF(kW - 60, 216, kW - 18, 234), accent.Get());
+        c->DrawTextW(L"强调色", 3, f.Get(), D2D1::RectF(30, 258, 200, 276), dim.Get());
+        if (g.accentSel >= 0 && g.accentSel < kAccentCount)
+            c->DrawTextW(kAccents[g.accentSel].name,
+                         (UINT32)wcslen(kAccents[g.accentSel].name),
+                         Fmt(12.5f, DWRITE_FONT_WEIGHT_NORMAL, L"Consolas").Get(),
+                         D2D1::RectF(kW - 90, 258, kW - 18, 276), accent.Get());
     }
     Slider(c, l.sliderOp, (g.opacity - 20) / 80.0f, accent.Get());
     Slider(c, l.sliderRd, g.radius / 24.0f, accent.Get());
+    DrawSwatches(c, l);
 
     // ---- 桌面 ----
-    SectionLabel(c, 198, L"桌面", accent.Get());
+    SectionLabel(c, 312, L"桌面", accent.Get());
     if (auto f = Fmt(13.0f, DWRITE_FONT_WEIGHT_NORMAL)) {
         c->DrawTextW(L"启用 Dock 栏（屏幕底部）", 14, f.Get(),
-                     D2D1::RectF(30, 212, 260, 234), txt.Get());
+                     D2D1::RectF(30, 326, 260, 348), txt.Get());
         c->DrawTextW(L"隐藏桌面图标", 6, f.Get(),
-                     D2D1::RectF(30, 242, 260, 264), txt.Get());
+                     D2D1::RectF(30, 356, 260, 378), txt.Get());
         c->DrawTextW(L"开机自动启动", 6, f.Get(),
-                     D2D1::RectF(30, 272, 260, 294), txt.Get());
+                     D2D1::RectF(30, 386, 260, 408), txt.Get());
     }
-    Toggle(c, l.togDock, g.ws->dock.visible, accent.Get());
-    Toggle(c, l.togHide, IsHideDesktopIcons(), accent.Get());
-    Toggle(c, l.togAuto, IsAutostartEnabled(), accent.Get());
+    Toggle(c, l.togDock, g.ws->dock.visible, g.hover == idDock, accent.Get());
+    Toggle(c, l.togHide, IsHideDesktopIcons(), g.hover == idHideDesk, accent.Get());
+    Toggle(c, l.togAuto, IsAutostartEnabled(), g.hover == idAutoRun, accent.Get());
 
     // ---- AI ----
-    SectionLabel(c, 306, L"AI 智能分组（仅手动触发 · 只上传文件名）", accent.Get());
+    SectionLabel(c, 424, L"AI 智能分组（仅手动触发 · 只上传文件名）", accent.Get());
     Pill(c, l.prov[0], L"DeepSeek 云端", g.aiProvSel == 0, g.hover == idProv0, accent.Get());
     Pill(c, l.prov[1], L"Ollama 本地",  g.aiProvSel == 1, g.hover == idProv1, accent.Get());
     if (auto f = Fmt(12.5f, DWRITE_FONT_WEIGHT_NORMAL)) {
-        c->DrawTextW(L"模型", 2, f.Get(), D2D1::RectF(30, 356, 200, 372), dim.Get());
-        c->DrawTextW(L"API Key", 7, f.Get(), D2D1::RectF(30, 404, 200, 420), dim.Get());
+        c->DrawTextW(L"模型", 2, f.Get(), D2D1::RectF(30, 466, 200, 482), dim.Get());
+        c->DrawTextW(L"API Key", 7, f.Get(), D2D1::RectF(30, 510, 200, 526), dim.Get());
     }
     Field(c, l.fieldModel, g.modelBuf, g.focusField == idModel,
           L"留空=默认", idModel);
@@ -545,12 +779,13 @@ void Render()
     TechButton(c, l.btnAiReset, L"重置", false, g.hover == idAiReset, true, accent.Get());
     if (auto f = Fmt(11.5f, DWRITE_FONT_WEIGHT_NORMAL)) {
         c->DrawTextW(g.status.c_str(), (UINT32)g.status.size(), f.Get(),
-                     D2D1::RectF(212, 462, kW - 18, 484), dim.Get());
+                     D2D1::RectF(228, 564, kW - 18, 590), dim.Get());
         c->DrawTextW(L"整理完成后先预览确认再应用；应用前自动备份",
-                     22, f.Get(), D2D1::RectF(30, 496, kW - 18, 512), dim.Get());
+                     22, f.Get(), D2D1::RectF(30, 596, kW - 18, 612), dim.Get());
     }
     TechButton(c, l.btnApply, L"保存并关闭", true, g.hover == idApply, true, accent.Get());
 
+    c->SetTransform(D2D1::Matrix3x2F::Identity());
     Compositor::Get().EndDraw(g.dlg);
 }
 
@@ -564,11 +799,12 @@ LRESULT CALLBACK DlgProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)self);
         break;
     }
-    case WM_NCHITTEST: {   // 四角圆角外穿透 + 整窗可拖动（标题区）
+    case WM_NCHITTEST: {   // M10：投影留白/四角圆角外穿透 + 标题区整窗拖动
         POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         ScreenToClient(h, &p);
         const float x = DipX(p.x), y = DipY(p.y);
-        const float rad = 12, inset = 4;
+        if (x < 0 || y < 0 || x >= kW || y >= kH) return HTTRANSPARENT;   // 留白
+        const float rad = 12;
         auto outside = [&](float cx, float cy) {
             const float dx = x - cx, dy = y - cy;
             return dx * dx + dy * dy > rad * rad;
@@ -722,12 +958,23 @@ void SettingsDialog::ShowSingle(HINSTANCE instance, Workspace& ws,
     g.backdropSel = (int)ws.defaultStyle.backdrop;
     g.opacity = (int)(ws.defaultStyle.opacity * 100 + 0.5f);
     g.radius  = (int)ws.defaultStyle.cornerRadiusDip;
+    g.accentSel = 0;   // 按当前强调色匹配最近预设
+    {
+        float best = 1e9f;
+        for (int i = 0; i < kAccentCount; ++i) {
+            const float dr = kAccents[i].c.r - ws.defaultStyle.accent.r;
+            const float dg = kAccents[i].c.g - ws.defaultStyle.accent.g;
+            const float db = kAccents[i].c.b - ws.defaultStyle.accent.b;
+            const float d = dr * dr + dg * dg + db * db;
+            if (d < best) { best = d; g.accentSel = i; }
+        }
+    }
     g.aiProvSel = (ws.ai.provider == L"ollama") ? 1 : 0;
     g.modelBuf = ws.ai.model;
 
     g.dlg = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW,
                             kClass, L"WinFence 设置", WS_POPUP,
-                            100, 100, (int)kW, (int)kH,
+                            100, 100, (int)kWinW, (int)kWinH,
                             nullptr, nullptr, instance, &g);
     if (!g.dlg) return;
     g.dpi = GetDpiForWindow(g.dlg);
@@ -738,8 +985,8 @@ void SettingsDialog::ShowSingle(HINSTANCE instance, Workspace& ws,
         return;
     }
 
-    // DPI 精确定位 + 居中
-    const int wPx = (int)(kW * g.dpi / 96), hPx = (int)(kH * g.dpi / 96);
+    // DPI 精确定位 + 居中（含投影留白）
+    const int wPx = (int)(kWinW * g.dpi / 96), hPx = (int)(kWinH * g.dpi / 96);
     RECT wa{};
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
     SetWindowPos(g.dlg, nullptr,

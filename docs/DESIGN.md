@@ -68,14 +68,19 @@ WinFence/
 │  │  ├─ DesktopScanner.h/.cpp       # Shell 枚举 → DesktopSnapshot（用户+公共桌面合并）
 │  │  ├─ DesktopWatcher.h/.cpp       # ReadDirectoryChangesW×2 + 防抖 + 配对 → FileEvent 队列
 │  │  ├─ Reconciler.h/.cpp           # 快照 diff / 事件 对账：增删改 → 模型更新
-│  │  └─ IconCache.h/.cpp            # HICON/HBITMAP → ID2D1Bitmap，LRU，键=(iconIndex, mtime)
+│  │  └─ (图标位图缓存见 ui/IconCache——依赖 D2D，按分层约定放 ui 层)
 │  ├─ ui/
-│  │  ├─ FenceWindow.h/.cpp          # 每栏一个 HWND：注册类、消息路由、命中测试
+│  │  ├─ FenceWindow.h/.cpp          # 每栏一个 HWND：注册类、消息路由、命中测试、
+│  │  │                              #   八方向缩放/折叠动画/滚动/内联重命名（交互逻辑并入本类）
 │  │  ├─ FenceRenderer.h/.cpp        # D2D 绘制：圆角容器/标题栏/图标网格/折叠动画
+│  │  ├─ FenceDrag.h                 # 栅栏↔Dock 内部拖拽共享状态与消息常量
+│  │  ├─ DockWindow.h/.cpp           # macOS 式 Dock：悬停放大/倒影/气泡/单击启动
 │  │  ├─ Compositor.h/.cpp           # D3D/DXGI/DComp 设备与交换链管理、窗口失联重建
 │  │  ├─ DropTarget.h/.cpp           # IDropTarget：CF_HDROP 只读接收 → FenceService
-│  │  ├─ Interaction.h/.cpp          # 标题栏拖动(HTCAPTION)、双击折叠、右键菜单、滚动
-│  │  └─ SettingsDialog.h/.cpp       # 中文设置弹窗（圆角/透明度/背景/默认样式）
+│  │  ├─ IconCache.h/.cpp            # HICON/HBITMAP → ID2D1Bitmap，LRU，键=(iconIndex, mtime)
+│  │  ├─ OrganizeHint.h/.cpp         # 首次拖入后的教育气泡（一次）
+│  │  ├─ SettingsDialog.h/.cpp       # 中文设置弹窗（D2D 整窗自绘：预览卡/色板/圆角/透明度）
+│  │  └─ AiPreviewDialog.h/.cpp      # AI 分组结果预览确认（应用/放弃）
 │  ├─ shell/
 │  │  ├─ DesktopAnchor.h/.cpp        # 定位 SHELLDLL_DefView/WorkerW、Z 序锚定与重锚
 │  │  ├─ ShellEnumerator.h/.cpp      # IShellFolder 枚举、PIDL→路径/显示名
@@ -87,9 +92,9 @@ WinFence/
 │  ├─ platform/
 │  │  ├─ DwmBackdrop.h/.cpp          # DWMSBT 探测与设置、暗色边框、圆角偏好
 │  │  ├─ PathGuard.h/.cpp            # 路径安全校验（§4.9，所有文件操作的唯一入口）
-│  │  └─ WinUtil.h                   # COM RAII、错误码转中文、utf8 转换
-│  └─ ai/                            # 迭代二占位（见 §6）：AiGroupingService、
-│     └─ ...                         # DeepSeekClient / OllamaClient / GroupPlanParser
+│  │  └─ WinUtil.h/.cpp              # COM RAII、错误码转中文、utf8 转换
+│  └─ ai/                            # 已实现（§6）：AiGrouping 协调 + AiClient 双后端
+│     └─ AiGrouping/AiClient         # DeepSeekClient / OllamaClient / GroupPlanParser
 └─ tests/                            # 可选：JSON 编解码、重命名配对、路径校验的单元测试
 ```
 

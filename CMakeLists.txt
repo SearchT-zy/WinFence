@@ -55,16 +55,8 @@ add_executable(winfence
   src/ui/DockWindow.cpp
   src/ai/AiClient.cpp
   src/ai/AiGrouping.cpp
-  src/ui/DockWindow.cpp
   src/ui/FenceRenderer.cpp
   src/ui/FenceWindow.cpp
-  # 待实现（DESIGN.md §1.2）：
-  #   src/core/FenceService.cpp  src/core/DesktopScanner.cpp
-  #   src/core/DesktopWatcher.cpp  src/core/Reconciler.cpp  src/core/IconCache.cpp
-  #   src/shell/ShellEnumerator.cpp  src/shell/IconExtractor.cpp
-  #   src/ui/DropTarget.cpp  src/ui/Interaction.cpp  src/ui/SettingsDialog.cpp
-  #   src/persist/ConfigStore.cpp  src/persist/JsonCodec.cpp
-  #   src/platform/PathGuard.cpp  src/platform/WinUtil.cpp
 )
 
 target_include_directories(winfence PRIVATE src)

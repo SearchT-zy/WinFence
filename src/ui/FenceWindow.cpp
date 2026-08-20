@@ -21,6 +21,7 @@ namespace winfence {
 namespace {
 
 constexpr wchar_t kClassName[] = L"WinFenceFenceWnd";
+constexpr wchar_t kShadowClass[] = L"WinFenceShadowWnd";   // M10 v3：投影窗口
 constexpr UINT kTimerReanchorDebounce = 1;
 constexpr UINT kTimerReanchorPeriodic = 2;
 constexpr UINT kTimerCollapseAnim     = 3;
@@ -56,6 +57,15 @@ void FenceWindow::RegisterClass(HINSTANCE instance)
                                          IMAGE_ICON, 0, 0, LR_DEFAULTSIZE);
     wc.lpszClassName = kClassName;
     RegisterClassExW(&wc);
+
+    // M10 v3：投影窗口类（纯渲染，全窗点击穿透）
+    WNDCLASSEXW sw{};
+    sw.cbSize        = sizeof(sw);
+    sw.lpfnWndProc   = &FenceWindow::ShadowWndProc;
+    sw.hInstance     = instance;
+    sw.lpszClassName = kShadowClass;
+    RegisterClassExW(&sw);
+
     g_wmTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 }
 
@@ -68,8 +78,10 @@ bool FenceWindow::Create(HINSTANCE instance, Fence& fence, Workspace& ws,
     cache_ = &cache;
     store_ = &store;
 
+    backdrop_ = DwmBackdrop::Detect();
     const SIZE sz = fence.collapsed ? fence.collapsedSizePx : fence.sizePx;
     auto mon = MonitorUtil::FromPoint(fence.posPx);
+    padPx_ = 0;   // M10 v3：面板窗口与面板同尺寸，投影走独立阴影窗口
     RECT r{fence.posPx.x, fence.posPx.y,
            fence.posPx.x + sz.cx, fence.posPx.y + sz.cy};
     r = MonitorUtil::ClampToWorkArea(r, mon);
@@ -90,7 +102,6 @@ bool FenceWindow::Create(HINSTANCE instance, Fence& fence, Workspace& ws,
         return false;
     }
 
-    backdrop_ = DwmBackdrop::Detect();
     DwmBackdrop::Apply(hwnd_, backdrop_);
 
     // §3.2/§4.6：OLE 拖入（Drop → PathGuard → 栅栏归属）
@@ -113,11 +124,16 @@ bool FenceWindow::Create(HINSTANCE instance, Fence& fence, Workspace& ws,
 
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     RequestRender();
+    CreateShadow();   // M10 v3：投影窗口垫到面板下方（锚定后插入，位置由 SyncShadow 对齐）
     return true;
 }
 
 void FenceWindow::Destroy()
 {
+    if (shadowHwnd_) {   // 先销毁投影窗口
+        DestroyWindow(shadowHwnd_);
+        shadowHwnd_ = nullptr;
+    }
     if (hwnd_) {
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;
@@ -135,8 +151,9 @@ void FenceWindow::RequestRender()
     if (!ctx) return;
     renderer_.Draw(*fence_, *icons_, *cache_, ctx, Compositor::Get().DWrite(), dpi_,
                    backdrop_ == BackdropSupport::SystemBackdrop, hoverUid_,
-                   dragUid, dropTarget);
+                   dragUid, dropTarget, plusHover_);
     Compositor::Get().EndDraw(hwnd_);
+    RenderShadow();   // 圆角/尺寸变化时同步投影（模糊位图有缓存，成本极低）
 }
 
 void FenceWindow::ScheduleSave()
@@ -190,6 +207,7 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
         if (wp != SIZE_MINIMIZED) {
             Compositor::Get().Resize(hwnd_, LOWORD(lp), HIWORD(lp));
             RequestRender();
+            SyncShadow();   // M10 v3：实时缩放/折叠动画期间投影跟随
         }
         return 0;
 
@@ -197,17 +215,21 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
         const UINT newDpi = HIWORD(wp);
         const FLOAT ratio = dpi_ ? (FLOAT)newDpi / (FLOAT)dpi_ : 1.0f;
         dpi_ = newDpi;
+        padPx_ = 0;   // M10 v3：面板留白恒为 0
         Compositor::Get().SetDpi(hwnd_, dpi_);
-        fence_->sizePx = {
-            (LONG)(fence_->sizePx.cx * ratio), (LONG)(fence_->sizePx.cy * ratio)};
-        fence_->collapsedSizePx = {
-            (LONG)(fence_->collapsedSizePx.cx * ratio),
-            (LONG)(fence_->collapsedSizePx.cy * ratio)};
-        auto* r = reinterpret_cast<RECT*>(lp);
+        auto* r = reinterpret_cast<RECT*>(lp);   // 建议窗口矩形（已按系统缩放）
         SetWindowPos(hwnd_, nullptr, r->left, r->top,
                      r->right - r->left, r->bottom - r->top,
                      SWP_NOACTIVATE | SWP_NOZORDER);
+        // 面板尺寸 = 新窗口 − 留白（比值缩放近似由建议矩形给出）
+        fence_->sizePx = {
+            (LONG)((r->right - r->left) - 2 * padPx_),
+            (LONG)((r->bottom - r->top) - 2 * padPx_)};
+        fence_->collapsedSizePx = {fence_->sizePx.cx,
+                                   (LONG)(fence_->collapsedSizePx.cy * ratio)};
+        fence_->posPx = {r->left + padPx_, r->top + padPx_};
         ScheduleSave();
+        SyncShadow();
         return 0;
     }
 
@@ -218,7 +240,7 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
     case WM_LBUTTONDBLCLK: {   // 双击图标 → 打开（§3.3）
         POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         IconUid uid = 0;
-        if (FenceRenderer::ItemAt(*fence_, *icons_, dpi_, pt, uid)) OpenItem(uid);
+        if (FenceRenderer::ItemAt(*fence_, *icons_, dpi_, padPx_, pt, uid)) OpenItem(uid);
         return 0;
     }
 
@@ -226,7 +248,7 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
         if (fence_->collapsed) break;
         POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         IconUid uid = 0;
-        if (FenceRenderer::ItemAt(*fence_, *icons_, dpi_, pt, uid)) {
+        if (FenceRenderer::ItemAt(*fence_, *icons_, dpi_, padPx_, pt, uid)) {
             pressUid_ = uid;
             pressPt_  = pt;
             SetCapture(hwnd_);
@@ -242,7 +264,7 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
             IconUid hit = 0;
             auto& items = fence_->items;
             const IconUid dragUid = FenceDrag::Get().uid;
-            if (FenceRenderer::ItemAt(*fence_, *icons_, dpi_, pt, hit) &&
+            if (FenceRenderer::ItemAt(*fence_, *icons_, dpi_, padPx_, pt, hit) &&
                 hit != dragUid) {
                 auto it = std::find(items.begin(), items.end(), dragUid);
                 auto jt = std::find(items.begin(), items.end(), hit);
@@ -288,14 +310,37 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         }
 
-        // ---- 普通悬停高亮 ----
+        // ---- 普通悬停：＋按钮 / 图标高亮 ----
         if (!mouseTracking_) {
             TRACKMOUSEEVENT tme{sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd_, 0};
             if (TrackMouseEvent(&tme)) mouseTracking_ = true;
         }
+        {
+            // 标题栏「＋」热区悬停（与 OnNcHitTest / WM_LBUTTONUP 共用常量；面板坐标系）
+            RECT rc{};
+            GetClientRect(hwnd_, &rc);
+            const int bx = pt.x - padPx_, by = pt.y - padPx_;
+            const int bw = rc.right - 2 * padPx_;
+            const int titleH = MonitorUtil::DipToPx(fence_->style.titleBarHeightDip, dpi_);
+            const int zoneW = MonitorUtil::DipToPx(kPlusZoneWidthDip, dpi_);
+            const int zoneR = MonitorUtil::DipToPx(kPlusZoneRightDip, dpi_);
+            const bool onPlus = !fence_->collapsed && by < titleH &&
+                                bx >= bw - zoneR && bx < bw - zoneR + zoneW;
+            if (onPlus != plusHover_) {
+                plusHover_ = onPlus;
+                RequestRender();
+            }
+            if (onPlus) {
+                if (hoverUid_ != 0) {   // 进入按钮区时清掉图标高亮
+                    hoverUid_ = 0;
+                    RequestRender();
+                }
+                return 0;
+            }
+        }
         if (fence_->collapsed) return 0;
         IconUid uid = 0;
-        FenceRenderer::ItemAt(*fence_, *icons_, dpi_, pt, uid);
+        FenceRenderer::ItemAt(*fence_, *icons_, dpi_, padPx_, pt, uid);
         if (uid != hoverUid_) {
             hoverUid_ = uid;
             RequestRender();
@@ -309,11 +354,12 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
             POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             RECT rc{};
             GetClientRect(hwnd_, &rc);
+            const int bx = pt.x - padPx_, by = pt.y - padPx_;
+            const int bw = rc.right - 2 * padPx_;
             const int titleH = MonitorUtil::DipToPx(fence_->style.titleBarHeightDip, dpi_);
             const int zoneW = MonitorUtil::DipToPx(kPlusZoneWidthDip, dpi_);
             const int zoneR = MonitorUtil::DipToPx(kPlusZoneRightDip, dpi_);
-            if (pt.y < titleH && pt.x >= rc.right - zoneR &&
-                pt.x < rc.right - zoneR + zoneW) {
+            if (by < titleH && bx >= bw - zoneR && bx < bw - zoneR + zoneW) {
                 if (onAction_) onAction_(AppAction::NewFence, 0);
                 return 0;
             }
@@ -365,8 +411,9 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
 
     case WM_MOUSELEAVE:
         mouseTracking_ = false;
-        if (hoverUid_ != 0) {
+        if (hoverUid_ != 0 || plusHover_) {
             hoverUid_ = 0;
+            plusHover_ = false;
             RequestRender();
         }
         return 0;
@@ -388,19 +435,21 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
 
-    case WM_SIZING: {
+    case WM_SIZING: {   // 约束的是面板最小尺寸（窗口 = 面板 + 留白）
         auto* r = reinterpret_cast<RECT*>(lp);
-        if (r->right - r->left < kMinWidthPx) {
+        const LONG pad2 = 2 * padPx_;
+        const LONG minW = kMinWidthPx + pad2, minH = kMinHeightPx + pad2;
+        if (r->right - r->left < minW) {
             if (wp == WMSZ_LEFT || wp == WMSZ_TOPLEFT || wp == WMSZ_BOTTOMLEFT)
-                r->left = r->right - kMinWidthPx;
+                r->left = r->right - minW;
             else
-                r->right = r->left + kMinWidthPx;
+                r->right = r->left + minW;
         }
-        if (r->bottom - r->top < kMinHeightPx) {
+        if (r->bottom - r->top < minH) {
             if (wp == WMSZ_TOP || wp == WMSZ_TOPLEFT || wp == WMSZ_TOPRIGHT)
-                r->top = r->bottom - kMinHeightPx;
+                r->top = r->bottom - minH;
             else
-                r->bottom = r->top + kMinHeightPx;
+                r->bottom = r->top + minH;
         }
         return TRUE;
     }
@@ -408,14 +457,16 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
     case WM_EXITSIZEMOVE: {
         RECT wr{};
         GetWindowRect(hwnd_, &wr);
-        const SIZE cur{wr.right - wr.left, wr.bottom - wr.top};
+        const SIZE cur{wr.right - wr.left - 2 * padPx_,   // 面板尺寸 = 窗口 − 留白
+                       wr.bottom - wr.top - 2 * padPx_};
         if (inModalLoop_) {   // 仅真实用户拖动结束才落模型（防幻影写）
-            fence_->posPx = {wr.left, wr.top};
+            fence_->posPx = {wr.left + padPx_, wr.top + padPx_};
             if (fence_->collapsed) fence_->collapsedSizePx = cur;
             else                   fence_->sizePx = cur;
             ScheduleSave();
         }
         inModalLoop_ = false;
+        SyncShadow();
         return 0;
     }
 
@@ -423,6 +474,7 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
         auto* wpos = reinterpret_cast<WINDOWPOS*>(lp);
         if (!(wpos->flags & SWP_NOZORDER))
             SetTimer(hwnd_, kTimerReanchorDebounce, 200, nullptr);
+        SyncShadow();   // M10 v3：拖动/程序化移动期间投影跟随
         break;
     }
 
@@ -430,8 +482,10 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
         if (wp == kTimerReanchorDebounce) {
             KillTimer(hwnd_, kTimerReanchorDebounce);
             DesktopAnchor::AnchorAll();
+            SyncShadow();   // 重锚后阴影窗必须重新插回面板下方
         } else if (wp == kTimerReanchorPeriodic) {
             DesktopAnchor::AnchorAll();
+            SyncShadow();
             ClampOntoScreen();
             RequestRender();
         } else if (wp == kTimerCollapseAnim) {
@@ -444,6 +498,7 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
             SetWindowPos(hwnd_, nullptr, 0, 0, wr.right - wr.left, cy,
                          SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
             RequestRender();
+            SyncShadow();
             if (t >= 1.0f) {
                 KillTimer(hwnd_, kTimerCollapseAnim);
                 animating_ = false;
@@ -454,6 +509,7 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
     case WM_DISPLAYCHANGE:
         ClampOntoScreen();
         DesktopAnchor::AnchorAll();
+        SyncShadow();
         RequestRender();
         return 0;
 
@@ -514,6 +570,7 @@ LRESULT FenceWindow::Handle(UINT msg, WPARAM wp, LPARAM lp)
 
     if (g_wmTaskbarCreated && msg == g_wmTaskbarCreated) {
         DesktopAnchor::HandleTaskbarCreated();
+        SyncShadow();   // Explorer 重启后阴影窗也要重新插入
         RequestRender();
         return 0;
     }
@@ -526,7 +583,13 @@ LRESULT FenceWindow::OnNcHitTest(LPARAM lp)
     ScreenToClient(hwnd_, &p);
     RECT rc{};
     GetClientRect(hwnd_, &rc);
-    const int w = rc.right, h = rc.bottom;
+    const int pad = padPx_;   // M10：投影留白
+    const int bw = rc.right - 2 * pad;
+    const int bh = rc.bottom - 2 * pad;
+    const int bx = p.x - pad, by = p.y - pad;
+
+    // ---- 面板外的留白区（投影）→ 点击穿透到桌面 ----
+    if (bx < 0 || by < 0 || bx >= bw || by >= bh) return HTTRANSPARENT;
 
     const int titleH = MonitorUtil::DipToPx(fence_->style.titleBarHeightDip, dpi_);
     const int radius = MonitorUtil::DipToPx(fence_->style.cornerRadiusDip, dpi_);
@@ -536,13 +599,13 @@ LRESULT FenceWindow::OnNcHitTest(LPARAM lp)
     {
         const int zoneW = MonitorUtil::DipToPx(kPlusZoneWidthDip, dpi_);
         const int zoneR = MonitorUtil::DipToPx(kPlusZoneRightDip, dpi_);
-        if (p.y < titleH && p.x >= w - zoneR && p.x < w - zoneR + zoneW)
+        if (by < titleH && bx >= bw - zoneR && bx < bw - zoneR + zoneW)
             return HTCLIENT;
     }
 
     // ---- 八方向缩放（THICKFRAME 命中测试，系统自动给大小光标）----
-    const bool atL = p.x < border, atR = p.x >= w - border;
-    const bool atT = p.y < border, atB = p.y >= h - border;
+    const bool atL = bx < border, atR = bx >= bw - border;
+    const bool atT = by < border, atB = by >= bh - border;
     if (atT && atL) return HTTOPLEFT;
     if (atT && atR) return HTTOPRIGHT;
     if (atB && atL) return HTBOTTOMLEFT;
@@ -554,21 +617,21 @@ LRESULT FenceWindow::OnNcHitTest(LPARAM lp)
 
     // ---- 圆角外的角 → 点击穿透到桌面 ----
     auto cornerOutside = [&](int cx, int cy) {
-        const double dx = p.x - cx, dy = p.y - cy;
+        const double dx = bx - cx, dy = by - cy;
         return dx * dx + dy * dy > (double)radius * radius;
     };
     if (radius > 0) {
-        if (p.x < radius && p.y < radius && cornerOutside(radius, radius))
+        if (bx < radius && by < radius && cornerOutside(radius, radius))
             return HTTRANSPARENT;
-        if (p.x >= w - radius && p.y < radius && cornerOutside(w - radius, radius))
+        if (bx >= bw - radius && by < radius && cornerOutside(bw - radius, radius))
             return HTTRANSPARENT;
-        if (p.x < radius && p.y >= h - radius && cornerOutside(radius, h - radius))
+        if (bx < radius && by >= bh - radius && cornerOutside(radius, bh - radius))
             return HTTRANSPARENT;
-        if (p.x >= w - radius && p.y >= h - radius && cornerOutside(w - radius, h - radius))
+        if (bx >= bw - radius && by >= bh - radius && cornerOutside(bw - radius, bh - radius))
             return HTTRANSPARENT;
     }
 
-    if (p.y < titleH) return HTCAPTION;
+    if (by < titleH) return HTCAPTION;
     if (fence_->collapsed) return HTTRANSPARENT;
     return HTCLIENT;
 }
@@ -587,7 +650,8 @@ void FenceWindow::StartCollapseAnim()
     RECT wr{};
     GetWindowRect(hwnd_, &wr);
     animFrom_ = wr.bottom - wr.top;
-    animTo_ = fence_->collapsed ? fence_->collapsedSizePx.cy : fence_->sizePx.cy;
+    const LONG pad2 = 2 * padPx_;   // 动画的是窗口高度（面板 + 留白）
+    animTo_ = (fence_->collapsed ? fence_->collapsedSizePx.cy : fence_->sizePx.cy) + pad2;
     if (animFrom_ == animTo_) return;   // 无需动画
     animStart_ = GetTickCount();
     animating_ = true;
@@ -605,7 +669,8 @@ void FenceWindow::ClampOntoScreen()
     if (clamped.left != wr.left || clamped.top != wr.top) {
         SetWindowPos(hwnd_, nullptr, clamped.left, clamped.top, 0, 0,
                      SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
-        fence_->posPx = {clamped.left, clamped.top};
+        fence_->posPx = {clamped.left + padPx_, clamped.top + padPx_};
+        SyncShadow();
     }
 }
 
@@ -617,7 +682,7 @@ void FenceWindow::ShowContextMenu(POINT screenPt)
     IconUid uid = 0;
     const bool onItem =
         !fence_->collapsed &&
-        FenceRenderer::ItemAt(*fence_, *icons_, dpi_, client, uid);
+        FenceRenderer::ItemAt(*fence_, *icons_, dpi_, padPx_, client, uid);
 
     HMENU menu = CreatePopupMenu();
     if (onItem) {
@@ -702,9 +767,10 @@ void FenceWindow::StartRename()
     const int titleH = MonitorUtil::DipToPx(fence_->style.titleBarHeightDip, dpi_);
     RECT rc{};
     GetClientRect(hwnd_, &rc);
+    const int pad = padPx_;
     renameEdit_ = CreateWindowExW(0, L"EDIT", fence_->title.c_str(),
                                   WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-                                  22, 3, rc.right - 90, titleH - 6,
+                                  22 + pad, 3 + pad, rc.right - 2 * pad - 90, titleH - 6,
                                   hwnd_, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!renameEdit_) return;
     SetWindowLongPtrW(renameEdit_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
@@ -733,6 +799,117 @@ void FenceWindow::CommitRename(bool save)
     renameEdit_ = nullptr;   // 先清，防 KILLFOCUS 重入
     DestroyWindow(edit);
     RequestRender();
+}
+
+// ============ M10 v3：投影窗口（垫在面板正下方，与亚克力并存无光晕）============
+
+LRESULT CALLBACK FenceWindow::ShadowWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    FenceWindow* self = nullptr;
+    if (msg == WM_NCCREATE) {
+        self = static_cast<FenceWindow*>(
+            reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
+        SetWindowLongPtrW(h, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+    } else {
+        self = reinterpret_cast<FenceWindow*>(GetWindowLongPtrW(h, GWLP_USERDATA));
+    }
+    if (self) return self->HandleShadowMsg(h, msg, wp, lp);
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+LRESULT FenceWindow::HandleShadowMsg(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_NCHITTEST:   // 全窗点击穿透（投影不吃鼠标）
+        return HTTRANSPARENT;
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        BeginPaint(h, &ps);
+        EndPaint(h, &ps);
+        RenderShadow();
+        return 0;
+    }
+    case WM_SIZE:
+        if (wp != SIZE_MINIMIZED) {
+            Compositor::Get().Resize(h, LOWORD(lp), HIWORD(lp));
+            RenderShadow();
+        }
+        return 0;
+    case WM_DPICHANGED: {   // 跨 DPI 屏移动：只更新自身 DPI，尺寸由面板决定
+        shadowDpi_ = HIWORD(wp);
+        Compositor::Get().SetDpi(h, shadowDpi_);
+        SyncShadow();
+        return 0;
+    }
+    case WM_DESTROY:
+        Compositor::Get().UnbindWindow(h);
+        return 0;
+    default:
+        break;
+    }
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+void FenceWindow::CreateShadow()
+{
+    if (shadowHwnd_ || !hwnd_ || !fence_) return;
+    const LONG sp = MonitorUtil::DipToPx((int)kShadowPadDip, dpi_);
+    RECT wr{};
+    GetWindowRect(hwnd_, &wr);
+    shadowHwnd_ = CreateWindowExW(
+        WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        kShadowClass, L"", WS_POPUP,
+        wr.left - sp, wr.top - sp,
+        (wr.right - wr.left) + 2 * sp, (wr.bottom - wr.top) + 2 * sp,
+        nullptr, nullptr, GetModuleHandleW(nullptr), this);
+    if (!shadowHwnd_) return;
+    shadowDpi_ = GetDpiForWindow(shadowHwnd_);
+    if (!shadowDpi_) shadowDpi_ = dpi_;
+    if (!Compositor::Get().BindWindow(shadowHwnd_, shadowDpi_)) {
+        DestroyWindow(shadowHwnd_);
+        shadowHwnd_ = nullptr;
+        return;
+    }
+    // 插入到面板正下方（不抢激活、不吃鼠标）
+    SetWindowPos(shadowHwnd_, hwnd_, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    ShowWindow(shadowHwnd_, SW_SHOWNOACTIVATE);
+    SyncShadow();
+    RenderShadow();
+}
+
+void FenceWindow::SyncShadow()
+{
+    if (!shadowHwnd_ || !hwnd_) return;
+    const LONG sp = MonitorUtil::DipToPx((int)kShadowPadDip,
+                                         shadowDpi_ ? shadowDpi_ : dpi_);
+    RECT wr{};
+    GetWindowRect(hwnd_, &wr);
+    SetWindowPos(shadowHwnd_, hwnd_, wr.left - sp, wr.top - sp,
+                 (wr.right - wr.left) + 2 * sp, (wr.bottom - wr.top) + 2 * sp,
+                 SWP_NOACTIVATE);
+}
+
+void FenceWindow::RenderShadow()
+{
+    if (!shadowHwnd_ || !fence_) return;
+    ID2D1DeviceContext* ctx = Compositor::Get().BeginDraw(shadowHwnd_);
+    if (!ctx) return;
+    const FLOAT kDip = 96.0f / (FLOAT)(shadowDpi_ ? shadowDpi_ : 96);
+    const FLOAT sp = (FLOAT)MonitorUtil::DipToPx((int)kShadowPadDip,
+                                                 shadowDpi_ ? shadowDpi_ : dpi_) * kDip;
+    RECT rc{};
+    GetClientRect(shadowHwnd_, &rc);
+    const FLOAT wD = (FLOAT)(rc.right - rc.left) * kDip;
+    const FLOAT hD = (FLOAT)(rc.bottom - rc.top) * kDip;
+    ctx->Clear(D2D1::ColorF(0, 0, 0, 0));
+    shadow_.Draw(ctx, D2D1::RectF(sp, sp, wD - sp, hD - sp),
+                 fence_->style.cornerRadiusDip);
+    Compositor::Get().EndDraw(shadowHwnd_);
 }
 
 } // namespace winfence
